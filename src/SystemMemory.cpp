@@ -1,5 +1,5 @@
 /**
- * @file SytemMemory.cpp
+ * @file SystemMemory.cpp
  * @brief Implementation of ESP32 memory and temperature monitoring helpers.
  *
  * Defines the diagnostic utilities declared in `include/SystemMemory.h`, providing formatted

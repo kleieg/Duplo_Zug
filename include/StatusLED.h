@@ -27,4 +27,5 @@ private:
     bool _lastWasOn;      // Track previous LED state for blink counting
     unsigned long _lastUpdate;
     bool _initialized;
+    bool _dirty;
 };

@@ -1,7 +1,7 @@
 
 #include "StatusLED.h"
 
-StatusLED::StatusLED(int pin) : _pin(pin), _color(CRGB::Black), _pattern(0), _blinking(false), _interval(500), _ontime(200), _blinkTimes(-1), _currentBlinks(0), _lastWasOn(false), _lastUpdate(0), _initialized(false)
+StatusLED::StatusLED(int pin) : _pin(pin), _color(CRGB::Black), _pattern(0), _blinking(false), _interval(500), _ontime(200), _blinkTimes(-1), _currentBlinks(0), _lastWasOn(false), _lastUpdate(0), _initialized(false), _dirty(true)
 {
     _leds[0] = CRGB::Black;
 }
@@ -39,6 +39,7 @@ void StatusLED::begin()
     
     _leds[0] = _color;
     FastLED.show();
+    _dirty = false;
 }
 
 /**
@@ -49,10 +50,12 @@ void StatusLED::setColor(CRGB color)
 {
     _color = color;
     _blinking = false;
+    _dirty = true;
     if (!_blinking && _initialized)
     {
         _leds[0] = _color;
         FastLED.show();
+        _dirty = false;
     }
 }
 
@@ -73,10 +76,12 @@ void StatusLED::setOff()
 {
     _color = CRGB::Black;
     _blinking = false;
+    _dirty = true;
     if (_initialized)
     {
         _leds[0] = CRGB::Black;
         FastLED.show();
+        _dirty = false;
     }
 }
 
@@ -95,8 +100,17 @@ void StatusLED::update()
     if (!_blinking)
     {
         // If not blinking, just ensure the LED shows the current color
-        _leds[0] = _color;
-        FastLED.show();
+        if (_leds[0] != _color)
+        {
+            _leds[0] = _color;
+            _dirty = true;
+        }
+
+        if (_dirty)
+        {
+            FastLED.show();
+            _dirty = false;
+        }
         return;
     }
     
@@ -107,7 +121,9 @@ void StatusLED::update()
         _blinking = false;
         _color = CRGB::Black; // Also reset color to black
         _leds[0] = CRGB::Black; // Turn LED off after finite blinks
+        _dirty = true;
         FastLED.show();
+        _dirty = false;
         return;
     }
     
@@ -131,15 +147,27 @@ void StatusLED::update()
     if (currentlyOn)
     {
         // LED should be on (showing the color)
-        _leds[0] = _color;
+        if (_leds[0] != _color)
+        {
+            _leds[0] = _color;
+            _dirty = true;
+        }
     }
     else
     {
         // LED should be off
-        _leds[0] = CRGB::Black;
+        if (_leds[0] != CRGB::Black)
+        {
+            _leds[0] = CRGB::Black;
+            _dirty = true;
+        }
     }
-    
-    FastLED.show();
+
+    if (_dirty)
+    {
+        FastLED.show();
+        _dirty = false;
+    }
 }
 
 /**
@@ -158,12 +186,14 @@ void StatusLED::setBlinking(bool blinking, int ontime, int interval, int times)
     _currentBlinks = 0;  // Reset blink counter
     _lastWasOn = false;  // Reset state tracking
     _lastUpdate = millis();
+    _dirty = true;
     
     if (!_blinking && _initialized)
     {
         // If blinking is disabled, set LED to solid color
         _leds[0] = _color;
         FastLED.show();
+        _dirty = false;
     }
 }
 

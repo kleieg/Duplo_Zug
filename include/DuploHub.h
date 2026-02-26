@@ -17,7 +17,7 @@
 #define DUPLO_HUB_H
 
 
-#include <vector>
+#include <array>
 #include "myLegoHub.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -120,8 +120,11 @@ private:
     QueueHandle_t responseQueue;
     TaskHandle_t bleTaskHandle;
     
-    // Command buffer for record / replay processing
-    std::vector<HubCommand> commandBuffer;
+    // Fixed command buffer for record / replay processing.
+    // Recording stops automatically when this capacity is reached.
+    static constexpr size_t COMMAND_BUFFER_CAPACITY = 32;
+    std::array<HubCommand, COMMAND_BUFFER_CAPACITY> commandBuffer{};
+    size_t commandBufferCount = 0;
     
     // Replay state management
     bool replaying = false;
@@ -333,8 +336,12 @@ public:
     byte getMotorPort();
 
     /**
-     * @brief Enable or disable command recording for replay functionality
-     * @param enable True to start recording commands, false to stop recording
+        * @brief Enable or disable command recording for replay functionality.
+        *
+        * Recording uses a fixed-size buffer with capacity `COMMAND_BUFFER_CAPACITY`.
+        * When full, recording is disabled automatically.
+        *
+        * @param enable True to start recording commands, false to stop recording.
      */
     void recordCommands(bool enable);
 
@@ -356,6 +363,12 @@ public:
      * @return true if replaying, false otherwise
      */
     bool isReplayActive() const;
+
+    /**
+     * @brief Check if command recording is currently active.
+     * @return true if recording is enabled, false otherwise.
+     */
+    bool isRecordingCommandsEnabled() const;
     
     /**
      * @brief Stop the current replay operation
@@ -400,22 +413,6 @@ public:
      * @param sound Sound ID.
      */
     void playSoundDirect(byte sound);
-
-    /**
-     * @brief Set LED color directly (low-level).
-     * @param color Color value.
-     */
-    void setLedColorDirect(Color color);
-
-    /**
-     * @brief Activate base speaker directly (low-level).
-     */
-    void activateBaseSpeakerDirect();
-
-    /**
-     * @brief Activate RGB light directly (low-level).
-     */
-    void activateRgbLightDirect();
 
     /**
      * @brief Activate color sensor (legacy method).

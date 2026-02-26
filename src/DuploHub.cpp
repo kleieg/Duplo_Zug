@@ -44,7 +44,7 @@
 #include "esp_timer.h"
 #include "esp_err.h"
 
-#undef DEBUG// Enable debug logging
+#define DEBUG// Enable debug logging
 #include "debug.h"
 
 // Initialize static instance pointer
@@ -53,6 +53,14 @@ DuploHub *DuploHub::instance = nullptr;
 namespace
 {
     constexpr uint64_t COLOR_SETTLE_DELAY_US = 250000; // 250 ms debounce window
+
+    HubCommand createHubCommand(CommandType type)
+    {
+        HubCommand cmd{};
+        cmd.type = type;
+        cmd.timestamp = esp_timer_get_time();
+        return cmd;
+    }
 
     // Shared state used to debounce the color sensor callback before emitting events
     portMUX_TYPE colorTimerMutex = portMUX_INITIALIZER_UNLOCKED;
@@ -319,12 +327,12 @@ void DuploHub::recordCommands(bool enable)
     recordCommandsEnabled = enable;
     if (enable)
     {
-        commandBuffer.clear(); // Clear existing commands when starting new recording
-        DEBUG_LOG("DuploHub: Command recording ENABLED. Buffer cleared.");
+        commandBufferCount = 0;
+        DEBUG_LOG("DuploHub: Command recording ENABLED. Fixed buffer (%zu) cleared.", COMMAND_BUFFER_CAPACITY);
     }
     else
     {
-        DEBUG_LOG("DuploHub: Command recording DISABLED. Buffer contains %zu commands.", commandBuffer.size());
+        DEBUG_LOG("DuploHub: Command recording DISABLED. Buffer contains %zu commands.", commandBufferCount);
     }
 }
 
@@ -335,7 +343,7 @@ void DuploHub::recordCommands(bool enable)
  */
 void DuploHub::replayCommands()
 {
-    if (commandBuffer.empty())
+    if (commandBufferCount == 0)
     {
         DEBUG_LOG("DuploHub: No commands to replay. Buffer is empty.");
         return;
@@ -350,26 +358,26 @@ void DuploHub::replayCommands()
     recordCommandsEnabled = false;
     
     // Normalize timestamps - set first command to time 0 and adjust all others relative to it
-    if (!commandBuffer.empty())
+    if (commandBufferCount > 0)
     {
         originalStartTime = commandBuffer[0].timestamp;
         
-        for (auto& cmd : commandBuffer)
+        for (size_t i = 0; i < commandBufferCount; ++i)
         {
-            cmd.timestamp -= originalStartTime;  // Normalize to start at 0
+            commandBuffer[i].timestamp -= originalStartTime;  // Normalize to start at 0
         }
         
         // Calculate total sequence duration (time of last command + some buffer)
-        if (commandBuffer.size() > 1)
+        if (commandBufferCount > 1)
         {
-            sequenceDuration = commandBuffer.back().timestamp + 1000000; // Add 1 second buffer
+            sequenceDuration = commandBuffer[commandBufferCount - 1].timestamp + 1000000; // Add 1 second buffer
         }
         else
         {
             sequenceDuration = 1000000; // Default 1 second for single command
         }
         
-        DEBUG_LOG("DuploHub: Normalized %zu commands. Sequence duration: %lld us", commandBuffer.size(), sequenceDuration);
+        DEBUG_LOG("DuploHub: Normalized %zu commands. Sequence duration: %lld us", commandBufferCount, sequenceDuration);
     }
     
     // Initialize replay state
@@ -378,7 +386,7 @@ void DuploHub::replayCommands()
     replayCycle = 0;
     replayStartTime = esp_timer_get_time();
     
-    DEBUG_LOG("DuploHub: Started replay of %zu recorded commands. Use getNextReplayCommand() to retrieve commands.", commandBuffer.size());
+    DEBUG_LOG("DuploHub: Started replay of %zu recorded commands. Use getNextReplayCommand() to retrieve commands.", commandBufferCount);
 }
 
 /**
@@ -387,7 +395,7 @@ void DuploHub::replayCommands()
  */
 const HubCommand* DuploHub::getNextReplayCommand()
 {
-    if (!replaying || commandBuffer.empty())
+    if (!replaying || commandBufferCount == 0)
     {
         return nullptr;
     }
@@ -396,7 +404,7 @@ const HubCommand* DuploHub::getNextReplayCommand()
     uint64_t totalElapsedTime = currentTime - replayStartTime;
 
     // Only play the sequence ONCE
-    if (replayIndex >= commandBuffer.size()) {
+    if (replayIndex >= commandBufferCount) {
         // End of sequence reached, stop replay
         DEBUG_LOG("DuploHub: Replay finished after one sequence");
         stopReplay();
@@ -407,7 +415,7 @@ const HubCommand* DuploHub::getNextReplayCommand()
     if (totalElapsedTime >= nextCmd.timestamp) {
         replayIndex++;
         DEBUG_LOG("DuploHub: Retrieved replay command %zu/%zu (type: %d) time: %llu us", 
-                  replayIndex, commandBuffer.size(), nextCmd.type, totalElapsedTime);
+                  replayIndex, commandBufferCount, nextCmd.type, totalElapsedTime);
         return &nextCmd;
     }
     return nullptr; // Not yet time to play this command
@@ -422,6 +430,11 @@ bool DuploHub::isReplayActive() const
     return replaying;
 }
 
+bool DuploHub::isRecordingCommandsEnabled() const
+{
+    return recordCommandsEnabled;
+}
+
 /**
  * @brief Stop the current command replay
  */
@@ -429,7 +442,7 @@ void DuploHub::stopReplay()
 {
     if (replaying)
     {
-        DEBUG_LOG("DuploHub: Stopping replay at command %zu/%zu, cycle %d", replayIndex, commandBuffer.size(), replayCycle + 1);
+        DEBUG_LOG("DuploHub: Stopping replay at command %zu/%zu, cycle %d", replayIndex, commandBufferCount, replayCycle + 1);
         replaying = false;
         replayIndex = 0;
         replayCycle = 0;
@@ -453,8 +466,22 @@ BaseType_t DuploHub::sendCommand(const HubCommand& cmd, TickType_t timeout)
     // Store command in buffer if recording is enabled
     if (recordCommandsEnabled)
     {
-        commandBuffer.push_back(cmd);
-        DEBUG_LOG("DuploHub: Command %d recorded to buffer. Buffer size: %zu", cmd.type, commandBuffer.size());
+        if (commandBufferCount < COMMAND_BUFFER_CAPACITY)
+        {
+            commandBuffer[commandBufferCount++] = cmd;
+            DEBUG_LOG("DuploHub: Command %d recorded to buffer. Buffer size: %zu/%zu", cmd.type, commandBufferCount, COMMAND_BUFFER_CAPACITY);
+
+            if (commandBufferCount >= COMMAND_BUFFER_CAPACITY)
+            {
+                recordCommandsEnabled = false;
+                DEBUG_LOG("DuploHub: Command buffer full (%zu). Recording stopped automatically.", COMMAND_BUFFER_CAPACITY);
+            }
+        }
+        else
+        {
+            recordCommandsEnabled = false;
+            DEBUG_LOG("DuploHub: Command buffer already full (%zu). Recording remains stopped.", COMMAND_BUFFER_CAPACITY);
+        }
     }
     
     // Send command to queue
@@ -469,9 +496,7 @@ void DuploHub::setHubName(const char *name)
 {
     if (commandQueue != nullptr)
     {
-        HubCommand cmd;
-        cmd.type = CommandType::CMD_SET_HUB_NAME;
-        cmd.timestamp = esp_timer_get_time(); // Add timestamp in microseconds
+        HubCommand cmd = createHubCommand(CommandType::CMD_SET_HUB_NAME);
         strncpy(cmd.data.hubName.name, name, sizeof(cmd.data.hubName.name) - 1);
         cmd.data.hubName.name[sizeof(cmd.data.hubName.name) - 1] = '\0'; // Ensure null termination
 
@@ -497,9 +522,7 @@ void DuploHub::setLedColor(DuploEnums::DuploColor color)
 {
     if (commandQueue != nullptr)
     {
-        HubCommand cmd;
-        cmd.type = CommandType::CMD_SET_LED_COLOR;
-        cmd.timestamp = esp_timer_get_time(); // Add timestamp in microseconds
+        HubCommand cmd = createHubCommand(CommandType::CMD_SET_LED_COLOR);
         cmd.data.led.color = (DuploEnums::DuploColor)color;
 
         if (sendCommand(cmd, pdMS_TO_TICKS(100)) != pdTRUE)
@@ -521,9 +544,7 @@ void DuploHub::setMotorSpeed(int speed)
 {
     if (commandQueue != nullptr)
     {
-        HubCommand cmd;
-        cmd.type = CommandType::CMD_MOTOR_SPEED;
-        cmd.timestamp = esp_timer_get_time(); // Add timestamp in microseconds
+        HubCommand cmd = createHubCommand(CommandType::CMD_MOTOR_SPEED);
         cmd.data.motor.speed = speed;
 
         if (sendCommand(cmd, pdMS_TO_TICKS(100)) != pdTRUE)
@@ -545,9 +566,7 @@ void DuploHub::stopMotor()
 {
     if (commandQueue != nullptr)
     {
-        HubCommand cmd;
-        cmd.type = CommandType::CMD_STOP_MOTOR;
-        cmd.timestamp = esp_timer_get_time(); // Add timestamp in microseconds
+        HubCommand cmd = createHubCommand(CommandType::CMD_STOP_MOTOR);
 
         if (sendCommand(cmd, pdMS_TO_TICKS(100)) != pdTRUE)
         {
@@ -569,9 +588,7 @@ void DuploHub::playSound(int soundId)
     DEBUG_LOG("DuploHub: playSound called with soundId: %d", soundId);
     if (commandQueue != nullptr)
     {
-        HubCommand cmd;
-        cmd.type = CommandType::CMD_PLAY_SOUND;
-        cmd.timestamp = esp_timer_get_time(); // Add timestamp in microseconds
+        HubCommand cmd = createHubCommand(CommandType::CMD_PLAY_SOUND);
         cmd.data.sound.soundId = soundId;
 
         if (sendCommand(cmd, pdMS_TO_TICKS(100)) != pdTRUE)
@@ -596,9 +613,7 @@ void DuploHub::activateRgbLight()
 {
     if (commandQueue != nullptr)
     {
-        HubCommand cmd;
-        cmd.type = CommandType::CMD_ACTIVATE_RGB_LIGHT;
-        cmd.timestamp = esp_timer_get_time(); // Add timestamp in microseconds
+        HubCommand cmd = createHubCommand(CommandType::CMD_ACTIVATE_RGB_LIGHT);
 
         if (sendCommand(cmd, pdMS_TO_TICKS(100)) != pdTRUE)
         {
@@ -618,9 +633,7 @@ void DuploHub::activateBaseSpeaker()
 {
     if (commandQueue != nullptr)
     {
-        HubCommand cmd;
-        cmd.type = CommandType::CMD_ACTIVATE_BASE_SPEAKER;
-        cmd.timestamp = esp_timer_get_time(); // Add timestamp in microseconds
+        HubCommand cmd = createHubCommand(CommandType::CMD_ACTIVATE_BASE_SPEAKER);
 
         if (sendCommand(cmd, pdMS_TO_TICKS(100)) != pdTRUE)
         {
@@ -640,9 +653,7 @@ void DuploHub::activateColorSensor()
 {
     if (commandQueue != nullptr)
     {
-        HubCommand cmd;
-        cmd.type = CommandType::CMD_ACTIVATE_COLOR_SENSOR;
-        cmd.timestamp = esp_timer_get_time(); // Add timestamp in microseconds
+        HubCommand cmd = createHubCommand(CommandType::CMD_ACTIVATE_COLOR_SENSOR);
 
         if (sendCommand(cmd, pdMS_TO_TICKS(100)) != pdTRUE)
         {
@@ -662,9 +673,7 @@ void DuploHub::activateSpeedSensor()
 {
     if (commandQueue != nullptr)
     {
-        HubCommand cmd;
-        cmd.type = CommandType::CMD_ACTIVATE_SPEED_SENSOR;
-        cmd.timestamp = esp_timer_get_time(); // Add timestamp in microseconds
+        HubCommand cmd = createHubCommand(CommandType::CMD_ACTIVATE_SPEED_SENSOR);
 
         if (sendCommand(cmd, pdMS_TO_TICKS(100)) != pdTRUE)
         {
@@ -684,9 +693,7 @@ void DuploHub::activateVoltageSensor()
 {
     if (commandQueue != nullptr)
     {
-        HubCommand cmd;
-        cmd.type = CommandType::CMD_ACTIVATE_VOLTAGE_SENSOR;
-        cmd.timestamp = esp_timer_get_time(); // Add timestamp in microseconds
+        HubCommand cmd = createHubCommand(CommandType::CMD_ACTIVATE_VOLTAGE_SENSOR);
 
         if (sendCommand(cmd, pdMS_TO_TICKS(100)) != pdTRUE)
         {
@@ -1117,6 +1124,8 @@ void DuploHub::updateBLE()
 {
     static bool wasEverConnected = false; // Track if we ever had a connection (BLE task context)
     static bool lastConnected = false;    // Track last connection state for callback
+    static unsigned long lastConnectAttemptLog = 0;
+    const unsigned long CONNECT_ATTEMPT_LOG_INTERVAL_MS = 10000;
 
     // Get current BLE states from Lpf2Hub
     bool hubConnected = hub.isConnected();
@@ -1129,13 +1138,18 @@ void DuploHub::updateBLE()
     // BLE Connection Management
     if (hubDisconnected)
     {
-        if (!wasEverConnected)
+        const unsigned long now = millis();
+        if (now - lastConnectAttemptLog >= CONNECT_ATTEMPT_LOG_INTERVAL_MS)
         {
-            DEBUG_LOG("BLE Task: Attempting initial connection to hub...");
-        }
-        else
-        {
-            DEBUG_LOG("BLE Task: Attempting to reconnect to hub...");
+            if (!wasEverConnected)
+            {
+                DEBUG_LOG("BLE Task: Attempting initial connection to hub...");
+            }
+            else
+            {
+                DEBUG_LOG("BLE Task: Attempting to reconnect to hub...");
+            }
+            lastConnectAttemptLog = now;
         }
         if(hubMACAddress != "")
         {
