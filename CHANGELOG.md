@@ -4,6 +4,51 @@ All notable changes to the DUPLO Train Controller project will be documented in 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Refactored command construction in `DuploHub` to a unified helper path for queue commands.
+- Optimized `StatusLED` updates with a dirty-flag to avoid unnecessary `FastLED.show()` calls.
+- Corrected water-button behavior in `TrainController` (removed unrelated color mutation, fixed log semantics).
+- Renamed memory utility implementation from `SytemMemory.cpp` to `SystemMemory.cpp`.
+
+### Removed
+
+- Removed unused globals and dead callback paths in `TrainController`.
+- Removed unimplemented low-level API declarations from `DuploHub` header.
+
+### Documentation
+
+- Added `Refactorings.md` as central technical record for refactorings, rationale, and migration planning.
+- Added migration analysis and phased facade implementation plan for consolidating Legoino usage via `myLegoHub`.
+
+## [2.2.0] - 2026-02-25
+
+### Added
+
+- Wake diagnostics at startup (`esp_sleep_get_wakeup_cause`) with detailed debug output.
+- Visual wake confirmation: controller RGB LED blinks green 5 times after sleep wake.
+- Sleep-entry indication with red blink sequence before LED off.
+- Guarded firmware upload window: requires continuous encoder button hold (≥2s) during startup, then opens 10-second upload mode.
+
+### Changed
+
+- Sleep timeout standardized to 5 minutes (`300000 ms`) for regular operation.
+- Encoder wake configuration updated to RTC **EXT1 ALL_LOW** (LOW-active button).
+- Deep-sleep wake path hardened with explicit RTC GPIO setup and hold management.
+- Fallback wake behavior added: if RTC wake is not possible on the configured pin, firmware falls back to light sleep GPIO wake.
+- BLE reconnect/initial connection attempt logging is throttled to one message every 10 seconds.
+- Command recording switched to a fixed buffer of **32 commands** (deterministic memory usage).
+- Recording now stops automatically when the command buffer reaches capacity.
+- `TrainController` recording LED/state now auto-resets when recording is stopped by buffer-full condition.
+
+### Documentation
+
+- Updated `README.md` with current sleep/wake behavior, upload-mode trigger logic, LED feedback states, monitoring notes, and troubleshooting guidance.
+- Updated `ARCHITECTURE.md` with dedicated power-management and wake strategy section.
+- Updated `hardware/Hardware.md` with encoder wake role and reset-vs-wake clarification.
+
 ## [2.1.0] - 2025-01-20
 
 ### Added

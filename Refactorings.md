@@ -2,6 +2,15 @@
 
 Dieses Dokument beschreibt die zuletzt umgesetzten Refactorings mit direkten Links auf die relevanten Code-Stellen und der jeweiligen Begründung.
 
+## Status (2026-02-26)
+
+- Refactoring-Änderungen sind auf dem Branch `refactorings/facade-plan-2026-02-26` isoliert.
+- `main` bleibt unverändert auf dem zuletzt gepushten Stand.
+- Dokumentation wurde synchron aktualisiert in:
+	- `CHANGELOG.md` (Unreleased-Eintrag)
+	- `ToDo.md` (Fortschritt Code-Optimierungen + Facade-Migration)
+	- `README.md` (Dateiname korrigiert, Link auf dieses Dokument)
+
 ## Übersicht
 
 | # | Refactoring | Code-Links | Begründung |

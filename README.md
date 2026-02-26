@@ -1,6 +1,6 @@
 # DUPLO Train Remote Controller System
 
-**A event-driven train remote control system for LEGO DUPLO, built on ESP32, FreeRTOS, and Bluetooth Low Energy (BLE).**
+**An event-driven train remote control system for LEGO DUPLO, built on ESP32, FreeRTOS, and Bluetooth Low Energy (BLE).**
 
 Copyright (c) 2022-2025 Ralf Zühlsdorff
 
@@ -60,6 +60,7 @@ This project is licensed under the terms of the MIT License. See the License sec
   - [Troubleshooting](#troubleshooting)
     - [Common Issues \& Solutions](#common-issues--solutions)
       - [Connection Problems](#connection-problems)
+      - [Sleep / Wake Problems](#sleep--wake-problems)
       - [Task Failures](#task-failures)
       - [Command Delays](#command-delays)
     - [Debug Mode](#debug-mode)
@@ -82,11 +83,11 @@ This project is licensed under the terms of the MIT License. See the License sec
 
 This project implements a robust, multi-layered, event-driven train controller for LEGO DUPLO trains. 
 
-The system not only covers the firmware to controll the DUPLO train but also the required hardware and the OpenSCAD files for the case of the handheld controller.
+The system not only covers the firmware to control the DUPLO train but also the required hardware and the OpenSCAD files for the case of the handheld controller.
 
-I used a Tenstar Super Mini ESP32-S3 FH4R2 controller (yes, it is totally overkill for this application) because it provides onboard functionality as a RGB LED (used for user feedback) and a charging controller for a 3.7V Lithium battery. This onboard functionality reduced the required external components for the handheld controller to only 6 SMD switches, a rotary encoder and a few SMD resistors plus 1 capacitor.
+I used a Tenstar Super Mini ESP32-S3 FH4R2 controller (yes, it is totally overkill for this application) because it provides onboard functionality such as an RGB LED (used for user feedback) and a charging controller for a 3.7V Lithium battery. This onboard functionality reduced the required external components for the handheld controller to only 6 SMD switches, a rotary encoder and a few SMD resistors plus 1 capacitor.
 
-The firmware builds on top of the open-source [Legoino](https://github.com/corneliusmunz/legoino) library created by Cornelius Munz, reusing its Powered Up protocol support while adding a hardened hardware abstraction tailored to ESP32 dual-core devices. Using both cores to implement the app signifficantly increased the overall reliability.
+The firmware builds on top of the open-source [Legoino](https://github.com/corneliusmunz/legoino) library created by Cornelius Munz, reusing its Powered Up protocol support while adding a hardened hardware abstraction tailored to ESP32 dual-core devices. Using both cores to implement the app significantly increased the overall reliability.
 
 Key pillars of the solution include:
 
@@ -95,42 +96,45 @@ Key pillars of the solution include:
 - **Thread-safe command and sensor queues**: Bidirectional, non-blocking communication between BLE and main application tasks.
 - **Automatic connection management**: Self-healing BLE connections with exponential backoff recovery.
 - **Enhanced logging and monitoring**: Real-time status, error, and performance reporting.
-- **Deep Sleep and Wakeup**: In case no user interactions have been detected for more than 5 minutes the device goes to sleep and can be waked up by pressing the encoder button.
+- **Deep Sleep and Wakeup**: After 5 minutes without interaction, the controller enters sleep mode and wakes via the encoder button, including visual wake confirmation and RTC/GPIO fallback handling.
 
-The high-level structure is summarised below; a deeper dive is available in [ARCHITECTURE.md](ARCHITECTURE.md).
+The high-level structure is summarized below; a deeper dive is available in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 
 ## User Interface
 
-THe handheld DUPLO train controller has 6 switches and a rotary encoder to send BLE commands to the DUPLO train hub. User feedback is provided through the onboard RGB LED of the ESP32-S3 controller.
+The handheld DUPLO train controller has 6 switches and a rotary encoder to send BLE commands to the DUPLO train hub. User feedback is provided through the onboard RGB LED of the ESP32-S3 controller.
 
 ### Quick Start: Connecting a DUPLO Train
 - Power on the controller (ESP32) and the DUPLO Train Hub. 
 - The DUPLO train will show a **white** blinking front light.
 - The RGB LED of the controller turns to **yellow**.
 - The controller immediately begins scanning for an active duplo train.
-- Once internal initializatioon of the controller is completed the RBB LED turns to **green**. 
+- Once internal initialization of the controller is completed, the RGB LED turns **green**.
 - If connected the DUPLO train will show a solid **blue** front light.
-- After DUPLO train has connected, the controller’s RGB status LED turns to *blue** and blinks 3 times to confirm link.
+- After DUPLO train has connected, the controller’s RGB status LED turns to **blue** and blinks 3 times to confirm link.
 - If no hub is found, the status LED pulses **orange** every few seconds to prompt you to power cycle or move the train closer.
 
 ### Button & Encoder Actions
-- **Rotary encoder (turn):** Proportionally ramps the train motor between full reverse, neutral, and full forward with a tactile centre detent to simplify stops.
+- **Rotary encoder (turn):** Proportionally ramps the train motor between full reverse, neutral, and full forward with a tactile center detent to simplify stops.
 - **Rotary encoder (press):** Wakes the controller from deep sleep.
-- **Record button:** Starts or stops capture of the current driving session, including speed, light, and sound changes for later replay.
+- **Rotary encoder (hold during startup):** Hold continuously for **≥2 seconds** within the first startup seconds to open a **10-second upload window**.
+- **Record button:** Starts or stops capture of the current driving session, including speed, light, and sound changes for later replay. Recording uses a fixed buffer of **32 commands** and stops automatically when full.
 - **Play button:** Replays the most recently recorded session, mirroring the captured timing for motor, LED, and audio cues. Press again to stop replay.
 - **Stop button:** Issues an immediate emergency stop, cutting motor power and triggering the associated brake feedback sequence. To start normal operation the stop button **HAS TO BE PRESSED AGAIN**!
-- **Light button:** Cycles through the preset DUPLO hub LED colours so the train can be themed without using a screen or app.
+- **Light button:** Cycles through the preset DUPLO hub LED colors so the train can be themed without using a screen or app.
 - **Sound button:** Steps through the curated horn, brake, and station audio effects for interactive play.
 - **Water button:** Runs the refill routine, pausing the train, playing the refill sound, and resuming at the previous throttle setting.
 
 
 ### Optical Feedback (Controller RGB LED)
-- **Blue (pulsing 5 times):** Connection to a DUPLO hub establish and ready for commands.
-- **Red (slow blinking):** Recording action sequence.
+- **Blue (pulsing 5 times):** Connection to a DUPLO hub established and ready for commands.
+- **Red (slow blinking):** Recording action sequence (until stopped manually or buffer limit reached).
 - **Yellow (slow blinking):** Replaying action sequence.
 - **Red (steady):** Emergency stop engaged. Goes off if button is engaged again
 - **Red (fast pulses 5 times):** Signals low voltage of DUPLO train battery every 300 seconds
+- **Green (blinks 5 times):** Controller has just woken from sleep.
+- **Red (2 quick blinks):** Sleep entry indication right before LED turns off.
 
 
 ### Implemented Sensor Callbacks
@@ -149,14 +153,17 @@ The color sensor is used to detect the color bricks provided with the DUPLO trai
 Currently all other colored bricks just set the headlight to the respective color.
 
 ### Auto-Sleep & Wake-Up
-- After **5 minutes** without button presses or encoder turns, the controller enters deep sleep to save power; the status LED fades out to indicate standby.
-- To reactivate, press the rotary encoder once to start initialization and connection cycle again
+- After **5 minutes** without button presses or encoder turns, the controller enters sleep mode to save power.
+- On supported RTC GPIOs, wake is configured via **EXT1 (ALL_LOW)** on the encoder button; if RTC wake is unavailable, the firmware falls back to light sleep with GPIO wake.
+- Right before sleeping, the controller shows a short red indication and then turns the RGB LED off.
+- To reactivate, press the rotary encoder once; on wake the RGB LED blinks green 5 times and then returns to normal status behavior.
+- During the first startup phase, only a **continuous** encoder press (≥2s) opens the 10-second firmware upload window; short presses do not trigger it.
 
 
 ---
 ## Architecture Overview
 
-The firmware is organised into three cooperating layers:
+The firmware is organized into three cooperating layers:
 
 1. **Application Layer (`TrainController`)** – orchestrates user input, status LED feedback, replay/record logic, and system health checks.
 2. **Hardware Abstraction Layer (`DuploHub`)** – maintains thread-safe command/response queues, sensors, and lifecycle management for the BLE task.
@@ -260,9 +267,9 @@ sequenceDiagram
 - **Real-Time Control**: Low-latency motor speed and LED color control driven by rotary encoder input.
 - **Sensor Integration**: Color, speed, and voltage sensors with callback support and queue isolation.
 - **Color Stability Filtering**: Timer-based debounce suppresses transient color readings before they reach the UI.
-- **Command Recording & Replay**: Capture user sessions and play them back with preserved timing.
+- **Command Recording & Replay**: Capture user sessions and play them back with preserved timing (fixed recording buffer: 32 commands, auto-stop on full buffer).
 - **Professional Logging**: Detailed, component-specific log messages and system status monitoring.
-- **Idle Power Management**: Automatic deep sleep after configurable idle periods, resume via encoder button.
+- **Idle Power Management**: Automatic idle sleep after 5 minutes, robust wake via encoder button, and fallback to GPIO light sleep where required.
 - **Resource Management**: Proper FreeRTOS object lifecycle management.
 - **Input Abstraction**: ADC button ladder and rotary encoder handlers with debounced callbacks.
 - **Demo Mode**: Non-blocking demo sequence with visual feedback and safety features.
@@ -274,7 +281,7 @@ sequenceDiagram
 ### Primary Hardware
 
 - **ESP32 Development Board ESP32-S3 Super Mini** (see link below)
-    I use the Tenstar ESP32-S3 FH4R2 SuperMini which also includes cuircits to charge a 3.7V Lithium battery.
+    I use the Tenstar ESP32-S3 FH4R2 SuperMini which also includes circuits to charge a 3.7V Lithium battery.
 - **LEGO DUPLO Train Hub** with motor connected to Port A
 - **USB Type C Cable** for programming and power
 
@@ -296,7 +303,7 @@ sequenceDiagram
 
 ## Hardware Design
 
-The following images show the KiCAD 3d view of the controller pcb and the OpenSCAD view of the controller case. To design the controller case the MachineBlocks library from pks5 (https://github.com/pks5/machineblocks) has been used.
+The following images show the KiCad 3D view of the controller PCB and the OpenSCAD view of the controller case. To design the controller case, the MachineBlocks library from pks5 (https://github.com/pks5/machineblocks) has been used.
 
 <p align="center">
     <img src="images/ControllerBoard%203d.png" alt="Controller board 3D render" width="26%">
@@ -322,7 +329,7 @@ See [hardware/Hardware.md](hardware/Hardware.md) for a detailed description of t
 - **Legoino**: LEGO Powered Up protocol implementation by Cornelius Munz
 - **NimBLE-Arduino**: Bluetooth Low Energy stack
 
-All other libs used are provided as source in include and src dir.
+All other libraries used are provided as source in the `include` and `src` directories.
 
 ### Library Versions
 
@@ -340,7 +347,7 @@ lib_deps =
 
 ## Installation
 
-Th development of this code has been done with MS Studio Code and PlatformIO.
+The development of this code has been done with MS Visual Studio Code and PlatformIO.
 
 ### 1. Environment Setup
 
@@ -381,13 +388,15 @@ pio device monitor
 
 1. **Startup**: System automatically starts and begins scanning for DUPLO hubs
 2. **Connection**: When hub is found, automatic connection is established
-3. **Demo**: Once connected, the demo sequence begins automatically
-4. **Monitoring**: Status information is displayed every 10 seconds
+3. **Optional upload window**: A continuous encoder-button hold of ≥2s shortly after startup opens a 10-second upload window
+4. **Demo**: Once connected, the demo sequence begins automatically
+5. **Monitoring**: Status information is displayed every 10 seconds
 
 ### Expected Serial Debug Output
 
 ```text
 TrainController: Starting up...
+TrainController: Wakeup cause=2 (EXT1)
 DuploHub: FreeRTOS objects initialized
 DuploHub: BLE task started successfully
 TrainController: Ready - BLE task running, waiting for hub connection...
@@ -506,6 +515,7 @@ BLACK, PINK, PURPLE, BLUE, LIGHTBLUE, CYAN, GREEN, YELLOW, ORANGE, RED, WHITE
 - **Connection Checks**: Every 1 second
 - **Command Processing**: Every 50ms
 - **Status Updates**: Every 10 seconds
+- **Connection Attempt Logs**: Throttled to every 10 seconds while disconnected
 
 ### Status Information
 
@@ -534,6 +544,11 @@ TrainController Status - BLE Task: Running, Hub Connected: Yes, Demo Active: Yes
 - Check if hub is already connected to another device
 - Reset hub by holding button for 10 seconds
 - Move ESP32 closer to hub (within 5 meters)
+
+#### Sleep / Wake Problems
+- The **encoder button** is the wake input; stop/reset buttons are not used as wake source in firmware sleep mode.
+- Check serial logs for wake diagnostics (`Wakeup cause`, `RTC-wake-capable`).
+- If upload mode opens unexpectedly, ensure the encoder button is not held LOW for more than 2 seconds during startup.
 
 #### Task Failures
 - Check available heap memory: `ESP.getFreeHeap()`
@@ -590,7 +605,7 @@ DuploTrain NG/
 │   ├── ADCButton.cpp
 │   ├── DuploHub.cpp
 │   ├── StatusLED.cpp
-│   ├── SytemMemory.cpp
+│   ├── SystemMemory.cpp
 │   ├── TrainController.cpp
 │   ├── debug.cpp
 │   └── myLegoHub.cpp
@@ -649,6 +664,8 @@ DuploTrain NG/
 
 ## Links
 
+- [Benutzerhandbuch (Kurz, DE)](Benutzerhandbuch_Kurz_DE.md)
+- [Refactorings und Migrationsplan](Refactorings.md)
 - [ESP32 Super Mini](https://de.aliexpress.com/item/1005010463397231.html?spm=a2g0o.productlist.main.4.54df76f7WPz7SU&aem_p4p_detail=202512080110153593710143562560003446235&algo_pvid=2100b7c8-e2b1-442a-bd2c-1100bbdba2ac&algo_exp_id=2100b7c8-e2b1-442a-bd2c-1100bbdba2ac-3&pdp_ext_f=%7B%22order%22%3A%222%22%2C%22eval%22%3A%221%22%2C%22fromPage%22%3A%22search%22%7D&pdp_npi=6%40dis%21EUR%215.49%215.49%21%21%2144.13%2144.13%21%40211b612817651850154035955e1646%2112000052495017919%21sea%21DE%216288981052%21X%211%210%21n_tag%3A-29919%3Bd%3A6804e1a2%3Bm03_new_user%3A-29895&curPageLogUid=KEHYNdqLToXo&utparam-url=scene%3Asearch%7Cquery_from%3A%7Cx_object_id%3A1005010463397231%7C_p_origin_prod%3A&search_p4p_id=202512080110153593710143562560003446235_1)
 - [Lithium Battery 3.7V](https://de.aliexpress.com/item/1005004378108918.html?spm=a2g0o.detail.pcDetailTopMoreOtherSeller.5.39c7kCFakCFaZ4&gps-id=pcDetailTopMoreOtherSeller&scm=1007.14452.478275.0&scm_id=1007.14452.478275.0&scm-url=1007.14452.478275.0&pvid=03756532-275c-4ab9-bd8a-2053af674cb4&_t=gps-id:pcDetailTopMoreOtherSeller,scm-url:1007.14452.478275.0,pvid:03756532-275c-4ab9-bd8a-2053af674cb4,tpp_buckets:668%232846%238108%231977&pdp_ext_f=%7B%22order%22%3A%2247%22%2C%22eval%22%3A%221%22%2C%22sceneId%22%3A%2230050%22%2C%22fromPage%22%3A%22recommend%22%7D&pdp_npi=6%40dis%21EUR%215.68%214.09%21%21%216.46%214.65%21%4021038e6617651853991155852e878e%2112000028967861661%21rec%21DE%216288981052%21X%211%210%21n_tag%3A-29919%3Bd%3A6804e1a2%3Bm03_new_user%3A-29895&utparam-url=scene%3ApcDetailTopMoreOtherSeller%7Cquery_from%3A%7Cx_object_id%3A1005004378108918%7C_p_origin_prod%3A&search_p4p_id=202512080116391515856091447492685637_4)
 - [MachineBlocks](https://github.com/pks5/machineblocks)
@@ -689,5 +706,5 @@ SOFTWARE.
 ---
 
 **Version:** 2.0.0  
-**Last Updated:** July 2025  
+**Last Updated:** February 2026  
 **Compatibility:** ESP32, Arduino Framework, PlatformIO
