@@ -56,7 +56,15 @@ DuploTrainController NG/
 
 The 6 function buttons are handled via ADC input with ADCButton lib, so just one button at a time can be detected. The Excel sheet is used to calculate the resistors so that voltage difference between two steps is in the same range.
 
-The encoder button is detected via a different GPIO pin for two reasons. First it provides a kind of second level for all function switches to implement future requirements. But main reason was that this button is used to wake the controller from deep sleep.
+The encoder button is detected via a dedicated GPIO pin for two reasons. First it provides a kind of second level for all function switches to implement future requirements. The main reason is power management: this button is used as the firmware wake source from sleep.
+
+Current firmware behavior tied to this hardware wiring:
+
+- After 5 minutes inactivity the controller enters sleep mode.
+- Wake-up is triggered by the encoder button (LOW-active), using RTC EXT1 wake when available.
+- During startup, a continuous encoder hold of at least 2 seconds opens a 10-second upload window.
+
+> **Reset vs. Wake:** The board reset pin (`EN`) performs a full MCU reset. Sleep wake logic in firmware is intentionally bound to the encoder button input.
 
 
 The Lithium 3.7V battery is connected to B+ and B- at the ESP32-S3. The schematic and PCB could be kept very simple as all functionality to handle charging is implemented by the ESP32-S3 Super Mini.
@@ -99,7 +107,7 @@ There are 2 black buttons for recording (with red dot) and replay (with white tr
 </p>
 
 
-The design is provided as a SCAD file and export to 3MF and STL files have been added for 3D printing.
+The design is provided as a SCAD file, and exported 3MF and STL files have been added for 3D printing.
 
 
 > **Note:** Both electrical and mechanical assets are version-controlled to keep the manufactured controller in sync with the firmware. When regenerating Gerbers or STLs, audit changes to ensure they reflect intentional design updates.

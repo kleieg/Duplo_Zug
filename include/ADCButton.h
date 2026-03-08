@@ -58,7 +58,9 @@ private:
     typedef struct
     {
         bool pressed;   ///< Current pressed state of the button
-        int adcValue;   ///< Expected ADC value when button is pressed (readonly after setup)
+        int adcValue;   ///< Representative ADC value when button is pressed (readonly after setup)
+        int adcMin;     ///< Minimum ADC value for this button range
+        int adcMax;     ///< Maximum ADC value for this button range
     } ButtonState;
 
     // Configuration parameters
@@ -110,6 +112,14 @@ public:
      * @param adcValue The ADC value expected when this button is pressed
      */
     void addButton(int button_no, int adcValue);
+
+    /**
+     * @brief Register a new button with an explicit ADC range
+     * @param button_no Button number (0-based index) to assign to this button
+     * @param adcMin Minimum ADC value that still belongs to this button
+     * @param adcMax Maximum ADC value that still belongs to this button
+     */
+    void addButtonRange(int button_no, int adcMin, int adcMax);
     
     /**
      * @brief Update all button states by reading and processing ADC values

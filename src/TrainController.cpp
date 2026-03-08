@@ -77,12 +77,17 @@ ONLY ON ESP32-S3 DEVKITC-1 WITH DUAL CORE
 // Pin declaration
 // All buttons are wired through a resistor ladder to ADC pin 7 and decoded by voltage level.
 // Current calibration (12-bit ADC values) for the GUI button helpers:
-// - Record: ~450-750  → starts/stops recording the command stream
-// - Play:   ~1000-1400 → toggles replay mode and command playback
-// - Stop:   ~1650-2000 → toggles the emergency stop or halts replay immediately
-// - Water:  ~2200-2550 → plays the water refill sound effect
-// - Light:  ~2800-3150 → cycles the hub LED through the DUPLO color palette
-// - Sound:  ~3500-3900 → advances to the next horn/brake sound sample
+// Measured nominal values with the assembled resistor ladder are approximately:
+// - Record: ~670
+// - Play:   ~1320
+// - Stop:   ~1930
+// - Water:  ~2500
+// - Light:  ~3090
+// - Sound:  ~3690
+//
+// Detection ranges are therefore derived from the midpoints between neighboring
+// nominal values, but leave a dead zone of about 240 ADC counts between buttons
+// for robust separation.
 // Re-run calibrateButtons() if your hardware uses different resistor values.
 
 #define ADC_PIN 7 // Button ADC pin (GPIO 7)
@@ -91,9 +96,10 @@ ONLY ON ESP32-S3 DEVKITC-1 WITH DUAL CORE
 #define ENCODER_A 12 // Encoder A pin
 #define ENCODER_B 13 // Encoder B pin
 #define ENCODER_BTN 11 // Encoder button pin
+#define ENCODER_STEPS_PER_DETENT 8 // Higher sensitivity than the library default of 4
 
 // Create rotary encoder instance
-RotaryEncoder rotaryEncoder = RotaryEncoder(ENCODER_A, ENCODER_B); //, ENCODER_BTN);
+RotaryEncoder rotaryEncoder = RotaryEncoder(ENCODER_A, ENCODER_B, RE_DEFAULT_PIN, RE_DEFAULT_PIN, ENCODER_STEPS_PER_DETENT); //, ENCODER_BTN);
 
 // Onboard RGB LED
 #define DATA_PIN 48
@@ -116,7 +122,6 @@ static int detectedColor = 0;
 static bool emergencyStop = false;
 
 static bool recording = false;
-static bool playback = false;
 static bool replay = false; // true when a sequence is being replayed
 
 ADCButtons guiButtons = ADCButtons(ADC_PIN);
@@ -127,6 +132,8 @@ static bool encoderButtonIsRtcWakeCapable();
 static void configureEncoderButtonLightSleepWakeup();
 static void startWakeupGreenBlink();
 static void indicateEnteringSleep();
+static bool shouldShowReadyHeartbeat();
+static void updateReadyHeartbeat();
 
 static bool wakeBlinkActive = false;
 static unsigned long wakeBlinkEndMs = 0;
@@ -134,6 +141,13 @@ static unsigned long wakeBlinkEndMs = 0;
 static bool uploadModeCheckActive = false;
 static unsigned long uploadModeCheckStartMs = 0;
 static unsigned long encoderBtnHoldStartMs = 0;
+static bool readyHeartbeatActive = false;
+static unsigned long lastReadyHeartbeatMs = 0;
+
+#define READY_HEARTBEAT_INTERVAL_MS 8000UL
+#define READY_HEARTBEAT_ON_MS 120
+#define READY_HEARTBEAT_OFF_MS 180
+#define READY_HEARTBEAT_BLINKS 2
 
 // Button numbers for GUI buttons
 enum GUIButtons
@@ -220,7 +234,7 @@ void handleButtons(int btn_no, bool pressed)
         if (recording)
         {
             DEBUG_LOG("TrainController: Recording started");
-            statusLed.setColor(CRGB::Red); // Blink red when recording
+            statusLed.setColor(CRGB::Purple); // Blink purple when recording
             statusLed.setBlinking(true, 500, 1000);
             duploHub.recordCommands(true); // Start recording commands
             delay(DELAY_TIME);             // Allow time for sound to play
@@ -235,40 +249,40 @@ void handleButtons(int btn_no, bool pressed)
         break;
     case BUTTON_PLAY:
         DEBUG_LOG("TrainController: start or stop playback");
-        // disable playback when recording is active
+        if (replay)
+        {
+            DEBUG_LOG("TrainController: PLAY ignored because replay is already active");
+            return;
+        }
+        // disable replay when recording is active
         if (recording)
         {
             DEBUG_LOG("TrainController: Playback disabled while recording is active");
             return; // Ignore playback if recording is active
         }
-        playback = !playback; // Toggle playback state  
-        if (playback)
-        {
-            duploHub.replayCommands();
-            statusLed.setColor(CRGB::Yellow);           // Blink yellow during replay
-            statusLed.setBlinking(true, 500, 1000);
-            replay = true; // Set replay mode
-        }
-        else
-        {
-            duploHub.stopReplay();
-            statusLed.setOff();
-            replay = false; // End replay mode
-        }
-        DEBUG_LOG("TrainController: Playback %s", playback ? "started" : "stopped");
+        duploHub.replayCommands();
+        statusLed.setColor(CRGB::Yellow);           // Blink yellow during replay
+        statusLed.setBlinking(true, 500, 1000);
+        replay = true; // Set replay mode
+        DEBUG_LOG("TrainController: Playback started");
         delay(DELAY_TIME);
         break;
     case BUTTON_STOP:
-        emergencyStop = !emergencyStop; // Toggle emergency stop state
         // If replay is active, stop replay and playback immediately
         if (replay) {
             duploHub.stopReplay();
-            statusLed.setOff();
-            playback = false;
             replay = false;
-            DEBUG_LOG("TrainController: STOP pressed during replay, replay stopped");
-            return;
+            DEBUG_LOG("TrainController: STOP pressed during replay, replay stopped before emergency stop handling");
         }
+
+        if (recording)
+        {
+            recording = false;
+            duploHub.recordCommands(false);
+            DEBUG_LOG("TrainController: Recording stopped because STOP was pressed");
+        }
+
+        emergencyStop = !emergencyStop; // Toggle emergency stop state
         if (emergencyStop)
         {
             statusLed.setColor(CRGB::Red); // Solid red when stop is active
@@ -314,8 +328,9 @@ static int lastSpeed = 0; // holds current mapping of poti setting to speed
 static void handleEncoder(long speed)
 {
     static long lastCall = millis();
+    const long requestedSpeed = -speed;
 
-    DEBUG_LOG("TrainController: Set motor speed to %d", speed);
+    DEBUG_LOG("TrainController: Set motor speed to %d", requestedSpeed);
 
     if (emergencyStop)
     {
@@ -331,7 +346,7 @@ static void handleEncoder(long speed)
         lastCall = millis(); // Update last call time
 
         // if emergencyStop triggered or poti in zero zone
-        if (speed > -MIN_SPEED && speed < MIN_SPEED)
+        if (requestedSpeed > -MIN_SPEED && requestedSpeed < MIN_SPEED)
         {
             duploHub.setMotorSpeed(0);
             lastSpeed = 0; // Reset lastSpeed to avoid repeated calls
@@ -340,8 +355,8 @@ static void handleEncoder(long speed)
         {
             // train speed changed
             lastUserActionTime = millis();
-            duploHub.setMotorSpeed(speed);
-            lastSpeed = speed;
+            duploHub.setMotorSpeed(requestedSpeed);
+            lastSpeed = requestedSpeed;
         }
         delay(DELAY_TIME);
         DEBUG_LOG("TrainController: Set motor speed to %d", lastSpeed);
@@ -355,6 +370,8 @@ static void handleEncoder(long speed)
  */
 static void detectedColorCb(DuploEnums::DuploColor color)
 {
+    static bool whiteLightEnabled = false;
+
     if (replay || recording) {
         DEBUG_LOG("TrainController: Color sensor callback ignored during recording and replay");
         return;
@@ -371,31 +388,51 @@ static void detectedColorCb(DuploEnums::DuploColor color)
         statusLed.setColor(CRGB::Black);
         delay(DELAY_TIME);
         break;
+
     case DuploEnums::DuploColor::RED:
         DEBUG_LOG("TrainController:  Detected Color: %d", DuploEnums::DuploColor::RED);
-        emergencyStop = !emergencyStop; // Toggle emergency stop state
-        statusLed.setColor(CRGB::Red);
-        statusLed.setBlinking(true, 250, 250, 3); // Set LED color to white
-        delay(DELAY_TIME);
+        statusLed.setColor(CRGB::Red); // Solid red when stop is active
+        statusLed.setBlinking(false);
         duploHub.playSound((DuploEnums::DuploSound::BRAKE)); // Play brake sound
         delay(DELAY_TIME);                                   // Allow time for sound to play
         duploHub.setLedColor(DuploEnums::DuploColor::RED);
         delay(DELAY_TIME);
+        duploHub.stopMotor();
+        delay(DELAY_TIME); // Stop the motor immediately
+        rotaryEncoder.setEncoderValue(0);
         break;
+
+    case DuploEnums::DuploColor::GREEN:
+    {
+        DEBUG_LOG("TrainController:  Detected Color: %d", DuploEnums::DuploColor::GREEN);
+        const int reverseSpeed = (lastSpeed == 0) ? -40 : -lastSpeed;
+        duploHub.setLedColor(DuploEnums::DuploColor::GREEN);
+        statusLed.setColor(CRGB::Green);
+        statusLed.setBlinking(true, 250, 250, 3);
+        delay(DELAY_TIME);
+        duploHub.stopMotor();
+        delay(DELAY_TIME);
+        duploHub.setMotorSpeed(reverseSpeed);
+        lastSpeed = reverseSpeed;
+        delay(DELAY_TIME);
+        break;
+    }
+
     case DuploEnums::DuploColor::YELLOW:
         DEBUG_LOG("TrainController:  Detected Color: %d", DuploEnums::DuploColor::YELLOW);
         duploHub.setLedColor(DuploEnums::DuploColor::YELLOW);
         statusLed.setColor(CRGB::Yellow);
-        statusLed.setBlinking(true, 250, 250, 3); // Set LED color to white
+        statusLed.setBlinking(true, 250, 250, 3);
         delay(DELAY_TIME);
         duploHub.playSound((DuploEnums::DuploSound::HORN)); // Play horn sound
         delay(DELAY_TIME);                                  // Allow time for sound to play
         break;
+
     case DuploEnums::DuploColor::BLUE:
         DEBUG_LOG("TrainController:  Detected Color: %d", DuploEnums::DuploColor::BLUE);
         duploHub.setLedColor(DuploEnums::DuploColor::BLUE);
         statusLed.setColor(CRGB::Blue);
-        statusLed.setBlinking(true, 250, 250, 3); // Set LED color to white
+        statusLed.setBlinking(true, 250, 250, 3);
         delay(DELAY_TIME);
         duploHub.stopMotor();
         delay(DELAY_TIME);                                          // Stop the motor
@@ -404,15 +441,16 @@ static void detectedColorCb(DuploEnums::DuploColor color)
         duploHub.setMotorSpeed(lastSpeed);                          // Restore the last speed
         delay(DELAY_TIME);
         break;
+
     case DuploEnums::DuploColor::WHITE:
         DEBUG_LOG("TrainController:  Detected Color: %d", DuploEnums::DuploColor::WHITE);
-        for (int i = 0; i < 3; i++)
-        {
-            duploHub.setLedColor(DuploEnums::DuploColor::WHITE);
-            statusLed.setColor(CRGB::White);
-            statusLed.setBlinking(true, 250, 250, 3); // Set LED color to white
-        }
+        whiteLightEnabled = !whiteLightEnabled;
+        duploHub.setLedColor(whiteLightEnabled ? DuploEnums::DuploColor::WHITE : DuploEnums::DuploColor::BLACK);
+        statusLed.setColor(CRGB::White);
+        statusLed.setBlinking(true, 250, 250, whiteLightEnabled ? 2 : 1);
+        delay(DELAY_TIME);
         break;
+
     default:
         DEBUG_LOG("TrainController:  Default Color action: %d", color);
         duploHub.setLedColor(color);
@@ -527,9 +565,8 @@ void replayNextCommand()
     const HubCommand *cmd = duploHub.getNextReplayCommand();
     if (cmd == nullptr)
     {
-        // If replay is no longer active, stop playback and update LED
+        // If replay is no longer active, stop replay state and update LED
         if (!duploHub.isReplayActive()) {
-            playback = false;
             replay = false;
             statusLed.setBlinking(false); // Stop blinking first
             statusLed.setOff();           // LED off when replay ends
@@ -596,7 +633,7 @@ void setup()
     Serial.begin(115200);
     delay(1000);
 
-    //  SerialMUTEX();
+    SerialMUTEX();
     DEBUG_LOG("TrainController (2 Core) : Starting up...");
     DEBUG_LOG("");
 
@@ -635,12 +672,12 @@ void setup()
     }
 
     // setup push buttons and register callback
-    guiButtons.addButton(BUTTON_RECORD, 600);         // Button 1: Record sequence
-    guiButtons.addButton(BUTTON_PLAY, 1220);          // Button 2: Play recorded sequence
-    guiButtons.addButton(BUTTON_STOP, 1815);          // Button 3: Emergency Stop
-    guiButtons.addButton(BUTTON_WATER, 2375);         // Button 4: Make sound fill up water
-    guiButtons.addButton(BUTTON_LIGHT, 2965);         // Button 5: Change lights
-    guiButtons.addButton(BUTTON_SOUND, 3750);         // Button 2: Sound
+    guiButtons.addButtonRange(BUTTON_RECORD, 430, 875);    // Button 1: Record sequence (nominal ~670)
+    guiButtons.addButtonRange(BUTTON_PLAY, 1115, 1505);    // Button 2: Play recorded sequence (nominal ~1320)
+    guiButtons.addButtonRange(BUTTON_STOP, 1745, 2095);    // Button 3: Emergency Stop (nominal ~1930)
+    guiButtons.addButtonRange(BUTTON_WATER, 2335, 2675);   // Button 4: Make sound fill up water (nominal ~2500)
+    guiButtons.addButtonRange(BUTTON_LIGHT, 2915, 3270);   // Button 5: Change lights (nominal ~3090)
+    guiButtons.addButtonRange(BUTTON_SOUND, 3510, 3870);   // Button 6: Sound (nominal ~3690)
     guiButtons.registerButtonCallback(handleButtons); // Register button callback
 
     // initialize rotary encoder and register callback
@@ -663,8 +700,7 @@ void setup()
 
     DEBUG_LOG("TrainController: Ready - BLE task running, waiting for hub connection...");
     if (!wakeBlinkActive) {
-        statusLed.setColor(CRGB::Green);       // Set color to green after initialization
-        statusLed.setBlinking(false);          // Solid green
+        statusLed.setOff();
     }
 
     // Start idle timer from boot so sleep works even when no user action is detected yet
@@ -684,6 +720,43 @@ static void startWakeupGreenBlink()
 
     statusLed.setColor(CRGB::Green);
     statusLed.setBlinking(true, onMs, offMs, blinkTimes);
+}
+
+static bool shouldShowReadyHeartbeat()
+{
+    const bool noLowVoltageWarningPending = (detectedVoltage <= 0.0f) || (detectedVoltage >= LOW_VOLTAGE_THRESHOLD);
+
+    return !wakeBlinkActive &&
+           !uploadModeCheckActive &&
+           !recording &&
+           !replay &&
+           !emergencyStop &&
+           noLowVoltageWarningPending;
+}
+
+static void updateReadyHeartbeat()
+{
+    const unsigned long now = millis();
+    const bool showHeartbeat = shouldShowReadyHeartbeat();
+
+    if (!showHeartbeat)
+    {
+        readyHeartbeatActive = false;
+        return;
+    }
+
+    if (!readyHeartbeatActive)
+    {
+        readyHeartbeatActive = true;
+        lastReadyHeartbeatMs = now - READY_HEARTBEAT_INTERVAL_MS;
+    }
+
+    if (now - lastReadyHeartbeatMs >= READY_HEARTBEAT_INTERVAL_MS)
+    {
+        statusLed.setColor(CRGB::Green);
+        statusLed.setBlinking(true, READY_HEARTBEAT_ON_MS, READY_HEARTBEAT_OFF_MS, READY_HEARTBEAT_BLINKS);
+        lastReadyHeartbeatMs = now;
+    }
 }
 
 static void indicateEnteringSleep()
@@ -813,7 +886,7 @@ void checkStatus(DuploHub &duploHub)
         float cpuTemp = getCPUTemperature();
         DEBUG_LOG("CPU Temperature: %.2f °C", cpuTemp);
 
-        if(detectedVoltage < LOW_VOLTAGE_THRESHOLD && !(recording || playback))
+        if(detectedVoltage < LOW_VOLTAGE_THRESHOLD && !(recording || replay))
         {
             DEBUG_LOG("TrainController: Low voltage detected: %.2f V", detectedVoltage);
             statusLed.setColor(CRGB::Red); // Set LED to red for low voltage
@@ -873,11 +946,10 @@ void loop()
         DEBUG_LOG("TrainController: Recording auto-stopped (record buffer full), LED turned off");
     }
 
-    // Finalize non-blocking wake blink: ensure we end up solid green.
+    // Finalize non-blocking wake blink and hand control back to the ready heartbeat.
     if (wakeBlinkActive && (long)(millis() - wakeBlinkEndMs) >= 0) {
         wakeBlinkActive = false;
-        statusLed.setBlinking(false);
-        statusLed.setColor(CRGB::Green);
+        statusLed.setOff();
     }
 
     // Enter upload mode only after continuous >=2s button hold during startup phase.
@@ -929,10 +1001,10 @@ void loop()
     }
 
  
+    guiButtons.updateButtons();
+
     if (duploHub.isConnected())
     {
-        guiButtons.updateButtons();
-
         // Handle replay commands if replay is active
         if (duploHub.isReplayActive())
         {
@@ -944,6 +1016,8 @@ void loop()
 
     // Check Duplo Hub State
     checkStatus(duploHub);
+
+    updateReadyHeartbeat();
 
     delay(20); // Add a small delay to reduce CPU load and prevent guru meditation error
 } // End of loop

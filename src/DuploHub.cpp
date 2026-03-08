@@ -66,6 +66,7 @@ namespace
     portMUX_TYPE colorTimerMutex = portMUX_INITIALIZER_UNLOCKED;
     esp_timer_handle_t colorStabilityTimer = nullptr;
     int pendingColor = -1;
+    int pendingRawColor = -1;
     int lastStableColor = -1;
 }
 
@@ -718,8 +719,6 @@ void DuploHub::staticColorSensorCallback(void *hub, byte portNumber, DeviceType 
     myLegoHub *myHub = (myLegoHub *)hub;
     (void)portNumber;
 
-    DEBUG_LOG("Enter color sensor static callback");
-
     if (deviceType != DeviceType::DUPLO_TRAIN_BASE_COLOR_SENSOR)
     {
         DEBUG_LOG("ERROR: Unsupported device type for color sensor callback");
@@ -727,6 +726,7 @@ void DuploHub::staticColorSensorCallback(void *hub, byte portNumber, DeviceType 
     }
 
     int detectedColor = myHub->parseColor(pData);
+
     if (detectedColor < DuploEnums::DuploColor::BLACK || detectedColor > DuploEnums::DuploColor::WHITE)
     {
         return; // Ignore out-of-range values entirely
@@ -761,19 +761,19 @@ void DuploHub::staticColorSensorCallback(void *hub, byte portNumber, DeviceType 
     if (pendingColor != detectedColor)
     {
         pendingColor = detectedColor;
+        pendingRawColor = pData[4];
         restartTimer = true;
     }
     else if (!timerActive)
     {
         // Timer already expired; ensure we arm it again to confirm stability
+        pendingRawColor = pData[4];
         restartTimer = true;
     }
     portEXIT_CRITICAL(&colorTimerMutex);
 
     if (restartTimer)
     {
-        DEBUG_LOG("(%ld) Static Color Callback - Candidate Color: %d", millis(), detectedColor);
-
         esp_err_t stopErr = esp_timer_stop(colorStabilityTimer);
         if (stopErr != ESP_OK && stopErr != ESP_ERR_INVALID_STATE)
         {
@@ -800,26 +800,28 @@ void DuploHub::colorStabilityTimerCallback(void *arg)
     (void)arg;
 
     int colorToEmit = -1;
+    int rawColorToEmit = -1;
     portENTER_CRITICAL(&colorTimerMutex);
     if (pendingColor >= DuploEnums::DuploColor::BLACK && pendingColor <= DuploEnums::DuploColor::WHITE)
     {
         if (pendingColor != lastStableColor)
         {
             colorToEmit = pendingColor;
+            rawColorToEmit = pendingRawColor;
             lastStableColor = pendingColor;
         }
     }
 
     pendingColor = -1;
+    pendingRawColor = -1;
     portEXIT_CRITICAL(&colorTimerMutex);
 
     if (colorToEmit == -1)
     {
-        DEBUG_LOG("(%ld) Color Stability Timer - No state change", millis());
         return;
     }
 
-    DEBUG_LOG("(%ld) Static Color Callback - Stable Color: %d", millis(), colorToEmit);
+    DEBUG_LOG("(%ld) Static Color Callback - Stable Color: raw=%d parsed=%d", millis(), rawColorToEmit, colorToEmit);
 
     if (instance != nullptr && instance->responseQueue != nullptr)
     {

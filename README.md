@@ -106,7 +106,8 @@ The high-level structure is summarized below; a deeper dive is available in [ARC
 The handheld DUPLO train controller has 6 switches and a rotary encoder to send BLE commands to the DUPLO train hub. User feedback is provided through the onboard RGB LED of the ESP32-S3 controller.
 
 ### Quick Start: Connecting a DUPLO Train
-- Power on the controller (ESP32) and the DUPLO Train Hub. 
+- Power on the controller (ESP32) and the DUPLO Train Hub.
+- If the controller was previously idle and has gone to sleep, wake it with a **short press on the rotary encoder**.
 - The DUPLO train will show a **white** blinking front light.
 - The RGB LED of the controller turns to **yellow**.
 - The controller immediately begins scanning for an active duplo train.
@@ -119,9 +120,9 @@ The handheld DUPLO train controller has 6 switches and a rotary encoder to send 
 - **Rotary encoder (turn):** Proportionally ramps the train motor between full reverse, neutral, and full forward with a tactile center detent to simplify stops.
 - **Rotary encoder (press):** Wakes the controller from deep sleep.
 - **Rotary encoder (hold during startup):** Hold continuously for **≥2 seconds** within the first startup seconds to open a **10-second upload window**.
-- **Record button:** Starts or stops capture of the current driving session, including speed, light, and sound changes for later replay. Recording uses a fixed buffer of **32 commands** and stops automatically when full.
-- **Play button:** Replays the most recently recorded session, mirroring the captured timing for motor, LED, and audio cues. Press again to stop replay.
-- **Stop button:** Issues an immediate emergency stop, cutting motor power and triggering the associated brake feedback sequence. To start normal operation the stop button **HAS TO BE PRESSED AGAIN**!
+- **Record button:** Starts or stops capture of the current driving session, including speed, light, and sound changes for later replay. Recording uses a fixed buffer of **32 commands** and stops automatically when full. Pressing the stop button during recording ends the recording first and then engages emergency stop.
+- **Play button:** Replays the most recently recorded session, mirroring the captured timing for motor, LED, and audio cues. Additional presses are ignored while replay is running; use the stop button to end replay.
+- **Stop button:** Issues an immediate emergency stop, cutting motor power and triggering the associated brake feedback sequence. If replay is active, replay is stopped first; if recording is active, recording is stopped first. To start normal operation the stop button **HAS TO BE PRESSED AGAIN**!
 - **Light button:** Cycles through the preset DUPLO hub LED colors so the train can be themed without using a screen or app.
 - **Sound button:** Steps through the curated horn, brake, and station audio effects for interactive play.
 - **Water button:** Runs the refill routine, pausing the train, playing the refill sound, and resuming at the previous throttle setting.
@@ -129,10 +130,11 @@ The handheld DUPLO train controller has 6 switches and a rotary encoder to send 
 
 ### Optical Feedback (Controller RGB LED)
 - **Blue (pulsing 5 times):** Connection to a DUPLO hub established and ready for commands.
-- **Red (slow blinking):** Recording action sequence (until stopped manually or buffer limit reached).
+- **Purple (slow blinking):** Recording action sequence (until stopped manually or buffer limit reached).
 - **Yellow (slow blinking):** Replaying action sequence.
 - **Red (steady):** Emergency stop engaged. Goes off if button is engaged again
 - **Red (fast pulses 5 times):** Signals low voltage of DUPLO train battery every 300 seconds
+- **Green (occasional short blink):** Controller ready / idle.
 - **Green (blinks 5 times):** Controller has just woken from sleep.
 - **Red (2 quick blinks):** Sleep entry indication right before LED turns off.
 
@@ -145,19 +147,26 @@ The controller provides callback implementations for speed, voltage and color se
 
 The color sensor is used to detect the color bricks provided with the DUPLO train set to trigger preprogrammed actions. The detection of the correct colors is very tricky as it depends on the reflection of the color bricks. So expect some wrong colors to be detected. As we overwrite the preprogrammed actions here is a short description of the implemented actions:
 
-- **RED** triggers a stop of the train with brake sound and red headlights
-- **YELLOW** triggers departure of the train with yellow blinking headlights and horn sound
-- **BLUE** triggers water refill action with blinking blue headlight, stop of train, water refill sound and departure of train with last defined speed
-
-
-Currently all other colored bricks just set the headlight to the respective color.
+- **YELLOW** triggers the horn.
+- **RED** stops the train.
+- **GREEN** stops the train and then reverses direction.
+- **WHITE** toggles the train light on/off.
+- **BLUE** triggers the water refill action: stop, refill sound, then continue with the previous speed.
 
 ### Auto-Sleep & Wake-Up
 - After **5 minutes** without button presses or encoder turns, the controller enters sleep mode to save power.
+- In sleep mode the controller LED is off.
+- The controller can be woken **only with the rotary encoder push button**; the normal front buttons do not wake it.
+- A **short press** wakes the controller for normal operation.
 - On supported RTC GPIOs, wake is configured via **EXT1 (ALL_LOW)** on the encoder button; if RTC wake is unavailable, the firmware falls back to light sleep with GPIO wake.
 - Right before sleeping, the controller shows a short red indication and then turns the RGB LED off.
 - To reactivate, press the rotary encoder once; on wake the RGB LED blinks green 5 times and then returns to normal status behavior.
 - During the first startup phase, only a **continuous** encoder press (≥2s) opens the 10-second firmware upload window; short presses do not trigger it.
+
+### Wake-Up for Users
+- If the controller appears “off”, first press the **rotary encoder** once.
+- Successful wake-up is confirmed by **5 green blinks** of the controller LED.
+- After wake-up, the controller resumes normal hub search/connection behavior automatically.
 
 
 ---

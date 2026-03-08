@@ -18,6 +18,11 @@
 // Define the mutex
 SemaphoreHandle_t serialMutex = NULL;
 
+namespace
+{
+    constexpr TickType_t SERIAL_MUTEX_TIMEOUT_TICKS = pdMS_TO_TICKS(10);
+}
+
 
 /**
  * @brief Initialize the serial mutex for thread-safe logging.
@@ -28,6 +33,11 @@ SemaphoreHandle_t serialMutex = NULL;
  */
 void SerialMUTEX()
 {
+    if (serialMutex != NULL)
+    {
+        return;
+    }
+
     serialMutex = xSemaphoreCreateMutex();
     if (serialMutex == NULL)
     {
@@ -53,20 +63,20 @@ void logWithMutex(const char *file, int line, const char *format, ...)
     char userMessage[192];
     vsnprintf(userMessage, sizeof(userMessage), format, args);
     va_end(args);
+
     char logMessage[256];
     snprintf(logMessage, sizeof(logMessage), "%s:%d: %s", file, line, userMessage);
+
     if (serialMutex != NULL)
     {
-        if (xSemaphoreTake(serialMutex, portMAX_DELAY) == pdTRUE)
+        if (xSemaphoreTake(serialMutex, SERIAL_MUTEX_TIMEOUT_TICKS) == pdTRUE)
         {
             Serial.println(logMessage);
-            Serial.flush();
             xSemaphoreGive(serialMutex);
         }
     }
     else
     {
         Serial.println(logMessage);
-        Serial.flush();
     }
 }

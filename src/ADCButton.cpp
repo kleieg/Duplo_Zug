@@ -38,7 +38,7 @@
 
 #include "ADCButton.h"
 
-#undef DEBUG 1 // Enable debug logging
+#define DEBUG // Enable debug logging
 #include "debug.h"
 
 /**
@@ -79,6 +79,7 @@ ADCButtons::ADCButtons(int adc_pin, int samples, int margin, int resolution, int
         this->debounceTime = 25;
 
     // Configure ADC pin for button reading
+    analogReadResolution(this->resolution);
     pinMode(this->adcPin, INPUT);
 
     // Allocate memory for the values array
@@ -93,6 +94,14 @@ ADCButtons::ADCButtons(int adc_pin, int samples, int margin, int resolution, int
     // Start with capacity for 5 buttons (can grow dynamically)
     buttonCapacity = 5;
     buttons = new ButtonState[buttonCapacity]();
+
+    for (int i = 0; i < buttonCapacity; i++)
+    {
+        buttons[i].adcValue = -1; // Mark all slots as unused until configured
+        buttons[i].adcMin = -1;
+        buttons[i].adcMax = -1;
+        buttons[i].pressed = false;
+    }
 }
 
 /**
@@ -176,11 +185,63 @@ void ADCButtons::addButton(int button_no, int adcValue)
         buttonCapacity = newCapacity;
     }
 
-    // Add the button at the specified index
-    buttons[button_no].adcValue = adcValue;
+    addButtonRange(button_no, adcValue - margin, adcValue + margin);
+}
+
+void ADCButtons::addButtonRange(int button_no, int adcMin, int adcMax)
+{
+    if (button_no < 0)
+    {
+        return;
+    }
+
+    if (adcMin > adcMax)
+    {
+        const int temp = adcMin;
+        adcMin = adcMax;
+        adcMax = temp;
+    }
+
+    if (adcMin < 0)
+    {
+        adcMin = 0;
+    }
+
+    const int maxAdcValue = (1 << resolution) - 1;
+    if (adcMax > maxAdcValue)
+    {
+        adcMax = maxAdcValue;
+    }
+
+    const int requiredCapacity = button_no + 1;
+    if (requiredCapacity > buttonCapacity)
+    {
+        const int newCapacity = (requiredCapacity > buttonCapacity * 2) ? requiredCapacity : buttonCapacity * 2;
+        ButtonState *newButtons = new ButtonState[newCapacity]();
+
+        for (int i = 0; i < buttonCount; i++)
+        {
+            newButtons[i] = buttons[i];
+        }
+
+        for (int i = buttonCount; i < newCapacity; i++)
+        {
+            newButtons[i].adcValue = -1;
+            newButtons[i].adcMin = -1;
+            newButtons[i].adcMax = -1;
+            newButtons[i].pressed = false;
+        }
+
+        delete[] buttons;
+        buttons = newButtons;
+        buttonCapacity = newCapacity;
+    }
+
+    buttons[button_no].adcMin = adcMin;
+    buttons[button_no].adcMax = adcMax;
+    buttons[button_no].adcValue = (adcMin + adcMax) / 2;
     buttons[button_no].pressed = false;
-    
-    // Update buttonCount to be the highest button number + 1
+
     if (button_no >= buttonCount)
     {
         buttonCount = button_no + 1;
@@ -206,6 +267,8 @@ void ADCButtons::updateButtons()
     static int currentIndex = 0;
     static bool bufferFilled = false;
     static unsigned long lastUpdate = 0;
+    static int lastRawAdcValue = -1;
+    static int settlingSamplesRemaining = 0;
 
     // Throttle ADC readings to avoid excessive sampling
     if (millis() - lastUpdate < debounceTime)
@@ -217,12 +280,34 @@ void ADCButtons::updateButtons()
     // Read ADC value from configured pin
     int adcValue = analogRead(adcPin);
 
-    DEBUG_LOG("ADCButtons: Read ADC value %d from pin %d", adcValue, adcPin);
+    const int settleThreshold = (margin > 25) ? (margin / 2) : 25;
+    if (lastRawAdcValue >= 0 && abs(adcValue - lastRawAdcValue) > settleThreshold)
+    {
+        settlingSamplesRemaining = samples;
+        currentIndex = 0;
+        bufferFilled = false;
+        DEBUG_LOG("ADCButtons: Detected ADC step from %d to %d, waiting for capacitor settling (%d samples)", lastRawAdcValue, adcValue, settlingSamplesRemaining);
+    }
+    lastRawAdcValue = adcValue;
 
 
     // Store value in circular buffer
     values[currentIndex] = adcValue;
     currentIndex = (currentIndex + 1) % samples;
+
+    if (settlingSamplesRemaining > 0)
+    {
+        settlingSamplesRemaining--;
+        if (settlingSamplesRemaining > 0)
+        {
+            return;
+        }
+
+        currentIndex = 0;
+        bufferFilled = false;
+        DEBUG_LOG("ADCButtons: Settling phase finished, collecting fresh samples");
+        return;
+    }
 
     // Mark buffer as filled after first complete cycle
     if (currentIndex == 0)
@@ -231,8 +316,9 @@ void ADCButtons::updateButtons()
         return; // Not enough samples yet, skip this update
 
     // Only use samples if buffer has been filled at least once
-    min = 4095; // Reset min to max possible ADC value
-    max = 0;    // Reset max to 0
+    min = (1 << resolution) - 1; // Reset min to max possible ADC value
+    max = 0;                     // Reset max to 0
+    int sum = 0;
     for (int i = 0; i < samples; i++)
     {
         // Update min/max values for calibration
@@ -240,6 +326,63 @@ void ADCButtons::updateButtons()
             min = values[i];
         if (values[i] > max)
             max = values[i];
+
+        sum += values[i];
+    }
+
+    const int average = sum / samples;
+    const int spread = max - min;
+
+    int detectedButton = -1;
+    int detectedDistance = (1 << resolution);
+
+    for (int i = 0; i < buttonCount; i++)
+    {
+        // Skip unused button slots (marked with adcValue = -1)
+        if (buttons[i].adcValue < 0)
+        {
+            continue;
+        }
+
+        if (average < buttons[i].adcMin || average > buttons[i].adcMax)
+        {
+            continue;
+        }
+
+        const int rangeCenter = (buttons[i].adcMin + buttons[i].adcMax) / 2;
+        const int distance = abs(average - rangeCenter);
+        if (distance < detectedDistance)
+        {
+            detectedDistance = distance;
+            detectedButton = i;
+        }
+    }
+
+    // A valid press must be close to one calibrated button and the sample spread must
+    // stay reasonably tight. This is much more tolerant of small ADC noise and short
+    // transitions than requiring every single sample to stay inside the button window.
+    if (detectedButton >= 0)
+    {
+        const int allowedSpread = (margin * 4 > 180) ? margin * 4 : 180;
+        if (spread > allowedSpread)
+        {
+            detectedButton = -1;
+        }
+    }
+
+    bool anyButtonPressedBeforeUpdate = false;
+    for (int i = 0; i < buttonCount; i++)
+    {
+        if (buttons[i].adcValue >= 0 && buttons[i].pressed)
+        {
+            anyButtonPressedBeforeUpdate = true;
+            break;
+        }
+    }
+
+    if (detectedButton >= 0 || anyButtonPressedBeforeUpdate)
+    {
+        DEBUG_LOG("ADCButtons: avg=%d min=%d max=%d spread=%d detected=%d distance=%d", average, min, max, spread, detectedButton, detectedDistance);
     }
 
     // Update all button states
@@ -251,15 +394,13 @@ void ADCButtons::updateButtons()
             continue;
         }
         
-        // Check if value is within margin of button's expected value
-        bool inRange = (min >= (buttons[i].adcValue - margin) &&
-                        max <= (buttons[i].adcValue + margin));
+        const bool inRange = (i == detectedButton);
     
         if(buttons[i].pressed && !inRange)  // transition from pressed to released
         {
             // Button released, log the state change
             buttons[i].pressed = false; // Update pressed state
-            DEBUG_LOG("Button %d: Released, adcValue: %d, [ %d,  %d ]", i, buttons[i].adcValue, min, max);
+            DEBUG_LOG("Button %d: Released, range=[%d,%d], avg=%d, [ %d, %d ]", i, buttons[i].adcMin, buttons[i].adcMax, average, min, max);
             
             // Call callback if registered
             if (callback != nullptr) {
@@ -269,7 +410,7 @@ void ADCButtons::updateButtons()
         else if(!buttons[i].pressed && inRange) // transition from released to pressed
         {
             buttons[i].pressed = true;
-            DEBUG_LOG("Button %d: Pressed, adcValue: %d, [ %d,  %d ]", i, buttons[i].adcValue, min, max);
+            DEBUG_LOG("Button %d: Pressed, range=[%d,%d], avg=%d, [ %d, %d ]", i, buttons[i].adcMin, buttons[i].adcMax, average, min, max);
             
             // Call callback if registered
             if (callback != nullptr) {
