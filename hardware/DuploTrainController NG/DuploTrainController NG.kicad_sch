@@ -1633,18 +1633,20 @@
 		)
 		(uuid "718d1265-1337-4948-a877-e4478acdcc68")
 	)
-	(text "fernsteuerung eines Dupplozuges \nController ESP32-S3 Supermini mit Betteriemanagement\nButtons werden über ein Widerstandsnetz als ADC Value eingelesen\nFahrsteuerung über Encoder"
+	(text "Duplo Train Remote Control V1.0 2026\n- Controller ESP32-S3 Supermini with Battery MAnagement Chip \n- All buttons will be read in as ADC values\n- Forward and reverse spee controlled by encoder \n- Press of encoder button wakes up from deep sleep\nLayout has been modified to fit also to smaller 5x16 dot case \nHeight of case is 5 Lego layers."
 		(exclude_from_sim no)
-		(at 181.864 172.212 0)
+		(at 181.864 173.736 0)
 		(effects
 			(font
 				(size 1.27 1.27)
+				(thickness 0.254)
+				(bold yes)
 			)
 			(justify left)
 		)
 		(uuid "71cf0abe-7f86-4178-8bb9-5c29f64532a2")
 	)
-	(text "3,3V wenn alle Schalter offen"
+	(text "3,3V if all Buttons are open"
 		(exclude_from_sim no)
 		(at 142.24 39.878 0)
 		(effects
@@ -1664,7 +1666,7 @@
 		)
 		(uuid "80498e59-6f96-4597-bce8-82645b4e0fb7")
 	)
-	(text "Funktion		R E24 in k		Uadc in V	delta\n\nEncoder Btn						0	\nRecord				0,43		0,540		0,540\nPlay				0,62		1,066		0,527\nStop				0,91		1,555		0,489\nWater				1,5			2,017		0,463\nLED Cycle			3,3			2,490		0,472\nSound Cycle		13			2,969		0,480\nalle offen						3,300		0,331"
+	(text "Function		R E24 in k		Uadc in V	delta\n\nEncoder Btn						0	\nRecord				0,43		0,540		0,540\nPlay				0,62		1,066		0,527\nStop				0,91		1,555		0,489\nWater				1,5			2,017		0,463\nLED Cycle			3,3			2,490		0,472\nSound Cycle		13			2,969		0,480\nalle offen						3,300		0,331"
 		(exclude_from_sim no)
 		(at 34.036 108.712 0)
 		(effects
@@ -3169,7 +3171,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Capacitor_THT:C_Rect_L7.0mm_W2.0mm_P5.00mm"
+		(property "Footprint" "Capacitor_SMD:C_0805_2012Metric"
 			(at 147.0152 57.15 0)
 			(effects
 				(font
@@ -3770,7 +3772,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "Speed / SHIFT"
+		(property "Value" "Speed / Wakeup"
 			(at 181.102 17.272 90)
 			(effects
 				(font

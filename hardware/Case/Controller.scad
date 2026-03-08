@@ -10,7 +10,7 @@
 * https://creativecommons.org/licenses/by-nc-sa/4.0/
 *
 */
-use <MachineBlocks/lib/block.scad>;
+use <lib/block.scad>;
 
 /* [View] */
 // How to view the brick in the editor
@@ -21,9 +21,9 @@ viewMode = "print"; // [print, assembled, cover]
 // Box size in X-direction specified as multiple of an 1x1 brick.
 boxSizeX = 16; // [1:32] 
 // Box size in Y-direction specified as multiple of an 1x1 brick.
-boxSizeY = 5; // [1:32] 
+boxSizeY = 6; // [1:32] 
 // Total box height specified as number of layers. Each layer has the height of one plate.
-boxLayers = 4; // [1:24]
+boxLayers = 6; // [1:24]
 
 /* [Appearance] */
 
@@ -85,8 +85,14 @@ tubeZSize = 6.4;
 
 
 // Koordinatenpositionen vom Ursprungin Mitte des Deckels
-l = 127.5;  // Laenge 16 Noppen aussen
-b = 39.7;   // Breite 5 Noppen aussen
+//l = 127.5;  // Laenge 16 Noppen aussen
+l = boxSizeX * 8 - 0.2;
+echo("Laenge = ",l);
+//b = 39.7;   // Breite 5 Noppen aussen
+b = boxSizeY * 8 - 0.2;
+echo("Breite = ", b);
+//h = boxLayers * 3.2;
+//echo("Hoehe = ", h);
 delta = 1;  // Abstand vom Innenwand
 
 function toX0(x) = l/2 - wallThickness - delta - x;
@@ -97,7 +103,7 @@ function toX0(x) = l/2 - wallThickness - delta - x;
 // Drehencoder 
 enc_x = toX0(8.5); 
 enc_y = 0;       
-enc_r = 3.5;
+enc_r = 3.6;
 
 // RGB LED
 led_x = toX0(27.0);
@@ -136,7 +142,7 @@ btn6_y = btn1_y - 20;
 // USB Typ C links
 usb_x = toX0(31.5);  // mitte          
 usb_z = 9.5;
-usb_dz = 5;
+usb_dz = 7;
 usb_dx = 12;
 
 
@@ -166,7 +172,7 @@ module makeLeftHole(x,z,dx,dz)
     echo("makeLeftHole: Variable x = ", x);
     echo("Variable z = ", z, "dz =", dz);
     color([1,0,0])
-        translate([x, 18, z])
+        translate([x, b/2-2, z])
             cube([dx, 5, dz], center = true);
 }
 
@@ -207,7 +213,7 @@ module Knob(farbe)
     height = 13;
     r1 = 12;
     r2 = 10;
-    eps = 0.1;   // Klemmung
+    eps = -0.15;   // Klemmung bei Materialschrupfung um 0,2mm
     w_wall = 2.5;
     r_hole = 3 - eps;
     
