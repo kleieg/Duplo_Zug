@@ -64,7 +64,7 @@ ADCButtons::ADCButtons(int adc_pin, int samples, int margin, int resolution, int
       max(0),
       buttonCount(0),
       buttonCapacity(0),
-      callback(nullptr)  // Initialize callback to nullptr
+      callback(nullptr) // Initialize callback to nullptr
 {
     // Input validation
     if (samples <= 0)
@@ -122,10 +122,10 @@ ADCButtons::~ADCButtons()
 
 /**
  * @brief Register a callback function for button state changes
- * 
+ *
  * Sets up a callback function that will be invoked whenever any button
  * changes state (pressed to released or released to pressed).
- * 
+ *
  * @param cb Callback function pointer, or nullptr to disable callbacks
  *           Function signature: void callback(int button_no, bool pressed)
  */
@@ -152,7 +152,7 @@ void ADCButtons::addButton(int button_no, int adcValue)
     {
         return; // Invalid button number
     }
-    
+
     if (adcValue < 0 || adcValue >= (1 << resolution))
     {
         return; // Invalid ADC value for current resolution
@@ -175,7 +175,7 @@ void ADCButtons::addButton(int button_no, int adcValue)
         // Initialize new slots to default values
         for (int i = buttonCount; i < newCapacity; i++)
         {
-            newButtons[i].adcValue = -1;  // Mark as unused
+            newButtons[i].adcValue = -1; // Mark as unused
             newButtons[i].pressed = false;
         }
 
@@ -188,6 +188,17 @@ void ADCButtons::addButton(int button_no, int adcValue)
     addButtonRange(button_no, adcValue - margin, adcValue + margin);
 }
 
+/**
+ * @brief Register a button using an explicit ADC range.
+ *
+ * Expands the internal button table when necessary, clamps the requested ADC
+ * interval to the configured ADC resolution, and stores the resulting range
+ * for later hit-testing in `updateButtons()`.
+ *
+ * @param button_no Zero-based button index to configure.
+ * @param adcMin Lowest ADC value that should map to the button.
+ * @param adcMax Highest ADC value that should map to the button.
+ */
 void ADCButtons::addButtonRange(int button_no, int adcMin, int adcMax)
 {
     if (button_no < 0)
@@ -289,7 +300,6 @@ void ADCButtons::updateButtons()
         DEBUG_LOG("ADCButtons: Detected ADC step from %d to %d, waiting for capacitor settling (%d samples)", lastRawAdcValue, adcValue, settlingSamplesRemaining);
     }
     lastRawAdcValue = adcValue;
-
 
     // Store value in circular buffer
     values[currentIndex] = adcValue;
@@ -393,28 +403,30 @@ void ADCButtons::updateButtons()
         {
             continue;
         }
-        
+
         const bool inRange = (i == detectedButton);
-    
-        if(buttons[i].pressed && !inRange)  // transition from pressed to released
+
+        if (buttons[i].pressed && !inRange) // transition from pressed to released
         {
             // Button released, log the state change
             buttons[i].pressed = false; // Update pressed state
             DEBUG_LOG("Button %d: Released, range=[%d,%d], avg=%d, [ %d, %d ]", i, buttons[i].adcMin, buttons[i].adcMax, average, min, max);
-            
+
             // Call callback if registered
-            if (callback != nullptr) {
-                callback(i, false);  // button_no = i, pressed = false
+            if (callback != nullptr)
+            {
+                callback(i, false); // button_no = i, pressed = false
             }
         }
-        else if(!buttons[i].pressed && inRange) // transition from released to pressed
+        else if (!buttons[i].pressed && inRange) // transition from released to pressed
         {
             buttons[i].pressed = true;
             DEBUG_LOG("Button %d: Pressed, range=[%d,%d], avg=%d, [ %d, %d ]", i, buttons[i].adcMin, buttons[i].adcMax, average, min, max);
-            
+
             // Call callback if registered
-            if (callback != nullptr) {
-                callback(i, true);  // button_no = i, pressed = true
+            if (callback != nullptr)
+            {
+                callback(i, true); // button_no = i, pressed = true
             }
         }
     }
@@ -435,11 +447,11 @@ bool ADCButtons::getButtonState(int button_no)
     {
         return false;
     }
-    
+
     // Check if button slot is actually used
     if (buttons[button_no].adcValue < 0)
     {
-        return false;  // Unused button slot
+        return false; // Unused button slot
     }
 
     return buttons[button_no].pressed;
@@ -455,7 +467,7 @@ int ADCButtons::getButtonCount() const
     int count = 0;
     for (int i = 0; i < buttonCount; i++)
     {
-        if (buttons[i].adcValue >= 0)  // Count only used button slots
+        if (buttons[i].adcValue >= 0) // Count only used button slots
         {
             count++;
         }
@@ -470,7 +482,7 @@ int ADCButtons::getButtonCount() const
  */
 int ADCButtons::getMaxButtonNumber() const
 {
-    return buttonCount - 1;  // buttonCount is the highest index + 1
+    return buttonCount - 1; // buttonCount is the highest index + 1
 }
 
 // ============================================================================

@@ -1,6 +1,10 @@
 
 #include "StatusLED.h"
 
+/**
+ * @brief Construct a status LED controller with default idle state.
+ * @param pin GPIO connected to the RGB LED data line.
+ */
 StatusLED::StatusLED(int pin) : _pin(pin), _color(CRGB::Black), _pattern(0), _blinking(false), _interval(500), _ontime(200), _blinkTimes(-1), _currentBlinks(0), _lastWasOn(false), _lastUpdate(0), _initialized(false), _dirty(true)
 {
     _leds[0] = CRGB::Black;
@@ -72,6 +76,9 @@ void StatusLED::setBrightness(int val)
     }
 }
 
+/**
+ * @brief Switch the LED off and cancel any active blink pattern.
+ */
 void StatusLED::setOff()
 {
     _color = CRGB::Black;

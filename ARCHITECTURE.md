@@ -25,7 +25,7 @@ Key runtime capabilities include:
 ESP32 Core 0 (Protocol Core)        ESP32 Core 1 (Application Core)
 ├── BLE Stack (NimBLE)              ├── Arduino Main Loop
 ├── BLE Task (DuploHub)             ├── TrainController Logic
-├── FreeRTOS Scheduler              ├── Demo State Machine
+├── FreeRTOS Scheduler              ├── Application State Machine
 └── Hardware Interrupts             └── User Callbacks
 ```
 

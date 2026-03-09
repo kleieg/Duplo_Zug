@@ -76,15 +76,30 @@ namespace DuploEnums
 }
 
 // Callback function types
+/**
+ * @brief Callback signature for hub connection-state changes.
+ */
 typedef void (*ConnectionCallback)();
 
 // Add a typedef for the detected color callback
+/**
+ * @brief Callback signature for stable color detections.
+ * @param color Parsed DUPLO color value.
+ */
 typedef void (*DetectedColorCallback)(DuploEnums::DuploColor);
 
 // Add a typedef for the speed callback
+/**
+ * @brief Callback signature for speed sensor updates.
+ * @param detectedSpeed Normalized train speed.
+ */
 typedef void (*DetectedSpeedCallback)(int detectedSpeed);
 
 // Add a typedef for the voltage callback
+/**
+ * @brief Callback signature for voltage sensor updates.
+ * @param detectedVoltage Measured hub voltage in volts.
+ */
 typedef void (*DetectedVoltageCallback)(float detectedVoltage);
 
 

@@ -114,14 +114,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Connection callbacks** for hub connect/disconnect events
 - **Motor control** with speed setting and stop functionality
 - **LED control** with color changes
-- **Demo sequence** with automatic train operation
+- **Basic train operation flow**
 - **Serial monitoring** with basic status output
 
 ### Technical Details
 - Single-threaded architecture using Arduino loop
 - Direct Lpf2Hub integration for BLE communication
 - Basic connection state tracking
-- Simple demo state machine
+- Simple application state machine
 
 ### Dependencies
 - Legoino library for LEGO Powered Up protocol

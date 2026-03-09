@@ -44,7 +44,7 @@
 #include "esp_timer.h"
 #include "esp_err.h"
 
-#define DEBUG// Enable debug logging
+#define DEBUG // Enable debug logging
 #include "debug.h"
 
 // Initialize static instance pointer
@@ -54,6 +54,11 @@ namespace
 {
     constexpr uint64_t COLOR_SETTLE_DELAY_US = 250000; // 250 ms debounce window
 
+    /**
+     * @brief Build a timestamped command object for the BLE worker queue.
+     * @param type Command type to assign to the new queue item.
+     * @return Initialized `HubCommand` containing the current timestamp.
+     */
     HubCommand createHubCommand(CommandType type)
     {
         HubCommand cmd{};
@@ -300,7 +305,6 @@ bool DuploHub::isDisconnected()
     return !isConnecting() && !isConnected();
 }
 
-
 /**
  * @brief Get the BLE address of the hub.
  * @return The hub's BLE address as a string.
@@ -349,25 +353,25 @@ void DuploHub::replayCommands()
         DEBUG_LOG("DuploHub: No commands to replay. Buffer is empty.");
         return;
     }
-    
+
     if (replaying)
     {
         DEBUG_LOG("DuploHub: Replay already in progress. Stopping current replay first.");
         stopReplay();
     }
-    
+
     recordCommandsEnabled = false;
-    
+
     // Normalize timestamps - set first command to time 0 and adjust all others relative to it
     if (commandBufferCount > 0)
     {
         originalStartTime = commandBuffer[0].timestamp;
-        
+
         for (size_t i = 0; i < commandBufferCount; ++i)
         {
-            commandBuffer[i].timestamp -= originalStartTime;  // Normalize to start at 0
+            commandBuffer[i].timestamp -= originalStartTime; // Normalize to start at 0
         }
-        
+
         // Calculate total sequence duration (time of last command + some buffer)
         if (commandBufferCount > 1)
         {
@@ -377,16 +381,16 @@ void DuploHub::replayCommands()
         {
             sequenceDuration = 1000000; // Default 1 second for single command
         }
-        
+
         DEBUG_LOG("DuploHub: Normalized %zu commands. Sequence duration: %lld us", commandBufferCount, sequenceDuration);
     }
-    
+
     // Initialize replay state
     replaying = true;
     replayIndex = 0;
     replayCycle = 0;
     replayStartTime = esp_timer_get_time();
-    
+
     DEBUG_LOG("DuploHub: Started replay of %zu recorded commands. Use getNextReplayCommand() to retrieve commands.", commandBufferCount);
 }
 
@@ -394,28 +398,30 @@ void DuploHub::replayCommands()
  * @brief Get the next command to replay if it's time to execute it
  * @return Pointer to the next command if ready, nullptr if no command ready or replay finished
  */
-const HubCommand* DuploHub::getNextReplayCommand()
+const HubCommand *DuploHub::getNextReplayCommand()
 {
     if (!replaying || commandBufferCount == 0)
     {
         return nullptr;
     }
-    
+
     uint64_t currentTime = esp_timer_get_time();
     uint64_t totalElapsedTime = currentTime - replayStartTime;
 
     // Only play the sequence ONCE
-    if (replayIndex >= commandBufferCount) {
+    if (replayIndex >= commandBufferCount)
+    {
         // End of sequence reached, stop replay
         DEBUG_LOG("DuploHub: Replay finished after one sequence");
         stopReplay();
         return nullptr;
     }
 
-    const HubCommand& nextCmd = commandBuffer[replayIndex];
-    if (totalElapsedTime >= nextCmd.timestamp) {
+    const HubCommand &nextCmd = commandBuffer[replayIndex];
+    if (totalElapsedTime >= nextCmd.timestamp)
+    {
         replayIndex++;
-        DEBUG_LOG("DuploHub: Retrieved replay command %zu/%zu (type: %d) time: %llu us", 
+        DEBUG_LOG("DuploHub: Retrieved replay command %zu/%zu (type: %d) time: %llu us",
                   replayIndex, commandBufferCount, nextCmd.type, totalElapsedTime);
         return &nextCmd;
     }
@@ -431,6 +437,10 @@ bool DuploHub::isReplayActive() const
     return replaying;
 }
 
+/**
+ * @brief Report whether command recording is currently enabled.
+ * @return `true` when outgoing commands are being captured for replay.
+ */
 bool DuploHub::isRecordingCommandsEnabled() const
 {
     return recordCommandsEnabled;
@@ -462,7 +472,7 @@ void DuploHub::stopReplay()
  * @param timeout Timeout for queue send operation
  * @return Result of xQueueSend operation
  */
-BaseType_t DuploHub::sendCommand(const HubCommand& cmd, TickType_t timeout)
+BaseType_t DuploHub::sendCommand(const HubCommand &cmd, TickType_t timeout)
 {
     // Store command in buffer if recording is enabled
     if (recordCommandsEnabled)
@@ -484,7 +494,7 @@ BaseType_t DuploHub::sendCommand(const HubCommand& cmd, TickType_t timeout)
             DEBUG_LOG("DuploHub: Command buffer already full (%zu). Recording remains stopped.", COMMAND_BUFFER_CAPACITY);
         }
     }
-    
+
     // Send command to queue
     return xQueueSend(commandQueue, &cmd, timeout);
 }
@@ -513,7 +523,6 @@ void DuploHub::setHubName(const char *name)
         hub.setHubName(hubName);
     }
 }
-
 
 /**
  * @brief Set the LED color on the hub (thread-safe).
@@ -947,7 +956,6 @@ byte DuploHub::getMotorPort()
     return motorPort;
 }
 
-
 /**
  * @brief List all device ports for the Duplo Train hub.
  */
@@ -1153,7 +1161,7 @@ void DuploHub::updateBLE()
             }
             lastConnectAttemptLog = now;
         }
-        if(hubMACAddress != "")
+        if (hubMACAddress != "")
         {
             hub.init(hubMACAddress);
             DEBUG_LOG("BLE Task: Using preferred hub address: %s", hubMACAddress.c_str());

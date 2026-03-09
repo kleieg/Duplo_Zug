@@ -18,6 +18,7 @@ This project is licensed under the terms of the MIT License. See the License sec
     - [Optical Feedback (Controller RGB LED)](#optical-feedback-controller-rgb-led)
     - [Implemented Sensor Callbacks](#implemented-sensor-callbacks)
     - [Auto-Sleep \& Wake-Up](#auto-sleep--wake-up)
+    - [Wake-Up for Users](#wake-up-for-users)
   - [Architecture Overview](#architecture-overview)
     - [Dual-Core Strategy](#dual-core-strategy)
     - [Future Improvements](#future-improvements)
@@ -201,7 +202,7 @@ This separation keeps latency predictable—even when the UI is busy—and preve
 
 ```mermaid
 graph LR
-   MainTask["<b>Core 1 – Main Task</b><br/>• Application logic<br/>• User interface<br/>• Status display<br/>• Demo logic<br/>• Sensor processing<br/>• Event callbacks"]
+  MainTask["<b>Core 1 – Main Task</b><br/>• Application logic<br/>• User interface<br/>• Status display<br/>• Replay / recording logic<br/>• Sensor processing<br/>• Event callbacks"]
 
    BleTask["<b>Core 0 – BLE Task</b><br/>• BLE operations<br/>• Hub connection<br/>• Motor commands<br/>• LED control<br/>• Sensor setup<br/>• Data parsing"]
 
@@ -217,7 +218,7 @@ graph LR
 
 ```mermaid
 graph LR
-   Layer1["<b>Layer 1: Application Layer</b><br/>• Train demo sequence &amp; state management<br/>• User interface &amp; status monitoring<br/>• High-level control logic<br/>• Connection event handling<br/>• Sensor data processing &amp; callbacks"]
+  Layer1["<b>Layer 1: Application Layer</b><br/>• Train control &amp; state management<br/>• User interface &amp; status monitoring<br/>• High-level control logic<br/>• Connection event handling<br/>• Sensor data processing &amp; callbacks"]
 
    Layer2["<b>Layer 2: Hardware Abstraction</b><br/>• Thread-safe command queue<br/>• Bidirectional FreeRTOS queues<br/>• Multi-task management (dual-core ESP32)<br/>• Connection state management<br/>• Automatic recovery &amp; error handling<br/>• Sensor routing &amp; callback management"]
 
@@ -281,7 +282,6 @@ sequenceDiagram
 - **Idle Power Management**: Automatic idle sleep after 5 minutes, robust wake via encoder button, and fallback to GPIO light sleep where required.
 - **Resource Management**: Proper FreeRTOS object lifecycle management.
 - **Input Abstraction**: ADC button ladder and rotary encoder handlers with debounced callbacks.
-- **Demo Mode**: Non-blocking demo sequence with visual feedback and safety features.
 
 ---
 
@@ -398,8 +398,7 @@ pio device monitor
 1. **Startup**: System automatically starts and begins scanning for DUPLO hubs
 2. **Connection**: When hub is found, automatic connection is established
 3. **Optional upload window**: A continuous encoder-button hold of ≥2s shortly after startup opens a 10-second upload window
-4. **Demo**: Once connected, the demo sequence begins automatically
-5. **Monitoring**: Status information is displayed every 10 seconds
+4. **Monitoring**: Status information is displayed every 10 seconds
 
 ### Expected Serial Debug Output
 
@@ -412,9 +411,7 @@ TrainController: Ready - BLE task running, waiting for hub connection...
 BLE Task: Started successfully
 BLE Task: Attempting initial connection to hub...
 BLE Task: Connected to HUB
-TrainController: Hub connected - initializing train demo!
-TrainController: Starting train demo sequence...
-TrainController Status - BLE Task: Running, Hub Connected: Yes, Demo Active: Yes
+TrainController Status - BLE Task: Running, Hub Connected: Yes
 ```
 
 
@@ -531,7 +528,7 @@ BLACK, PINK, PURPLE, BLUE, LIGHTBLUE, CYAN, GREEN, YELLOW, ORANGE, RED, WHITE
 The system provides comprehensive monitoring through serial output:
 
 ```text
-TrainController Status - BLE Task: Running, Hub Connected: Yes, Demo Active: Yes
+TrainController Status - BLE Task: Running, Hub Connected: Yes
 ```
 
 ### Log Message Prefixes

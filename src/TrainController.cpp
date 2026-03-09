@@ -93,9 +93,9 @@ ONLY ON ESP32-S3 DEVKITC-1 WITH DUAL CORE
 #define ADC_PIN 7 // Button ADC pin (GPIO 7)
 
 // Speed is defined via rotary encoder
-#define ENCODER_A 12 // Encoder A pin
-#define ENCODER_B 13 // Encoder B pin
-#define ENCODER_BTN 11 // Encoder button pin
+#define ENCODER_A 12               // Encoder A pin
+#define ENCODER_B 13               // Encoder B pin
+#define ENCODER_BTN 11             // Encoder button pin
 #define ENCODER_STEPS_PER_DETENT 8 // Higher sensitivity than the library default of 4
 
 // Create rotary encoder instance
@@ -126,13 +126,49 @@ static bool replay = false; // true when a sequence is being replayed
 
 ADCButtons guiButtons = ADCButtons(ADC_PIN);
 
+/**
+ * @brief Configure deep-sleep wake handling for the encoder button.
+ * @param enableHold `true` to retain RTC configuration across deep sleep.
+ */
 static void configureEncoderButtonWakeup(bool enableHold);
+
+/**
+ * @brief Convert an ESP sleep wake reason into a readable string.
+ * @param cause Wakeup reason reported by the ESP-IDF sleep subsystem.
+ * @return Static string representation of the wake cause.
+ */
 static const char *wakeupCauseToString(esp_sleep_wakeup_cause_t cause);
+
+/**
+ * @brief Check whether the encoder button pin supports RTC wake.
+ * @return `true` when the configured pin can be used for RTC-based wakeup.
+ */
 static bool encoderButtonIsRtcWakeCapable();
+
+/**
+ * @brief Configure the encoder button as a light-sleep wake source.
+ */
 static void configureEncoderButtonLightSleepWakeup();
+
+/**
+ * @brief Start the green blink sequence used to acknowledge wakeup.
+ */
 static void startWakeupGreenBlink();
+
+/**
+ * @brief Show the visual transition that indicates imminent sleep entry.
+ */
 static void indicateEnteringSleep();
+
+/**
+ * @brief Decide whether the idle ready-heartbeat may currently be shown.
+ * @return `true` if no higher-priority status indication is active.
+ */
 static bool shouldShowReadyHeartbeat();
+
+/**
+ * @brief Drive the periodic ready-heartbeat blink pattern.
+ */
 static void updateReadyHeartbeat();
 
 static bool wakeBlinkActive = false;
@@ -201,7 +237,8 @@ void handleButtons(int btn_no, bool pressed)
     lastUserActionTime = millis();
 
     // If replay is active, only STOP and PLAY (replay) buttons are allowed
-    if (replay && btn_no != BUTTON_STOP && btn_no != BUTTON_PLAY) {
+    if (replay && btn_no != BUTTON_STOP && btn_no != BUTTON_PLAY)
+    {
         DEBUG_LOG("TrainController: Ignoring button %d during replay", btn_no);
         return;
     }
@@ -210,8 +247,10 @@ void handleButtons(int btn_no, bool pressed)
     {
     case BUTTON_SOUND:
         sound++;
-        if (sound == 2) sound = 3; // skip WATER_REFILL sound
-        if (sound == 5) sound = 0;
+        if (sound == 2)
+            sound = 3; // skip WATER_REFILL sound
+        if (sound == 5)
+            sound = 0;
         duploHub.playSound((DuploEnums::DuploSound)duploSounds[sound]);
         DEBUG_LOG("TrainController: Sound button pressed, playing sound %d", sound);
         delay(DELAY_TIME);
@@ -244,7 +283,7 @@ void handleButtons(int btn_no, bool pressed)
             DEBUG_LOG("TrainController: Recording stopped");
             duploHub.recordCommands(false); // Stop recording commands
             statusLed.setOff();             // LED off when recording stops
-            delay(DELAY_TIME); // Allow time for sound to play
+            delay(DELAY_TIME);              // Allow time for sound to play
         }
         break;
     case BUTTON_PLAY:
@@ -261,7 +300,7 @@ void handleButtons(int btn_no, bool pressed)
             return; // Ignore playback if recording is active
         }
         duploHub.replayCommands();
-        statusLed.setColor(CRGB::Yellow);           // Blink yellow during replay
+        statusLed.setColor(CRGB::Yellow); // Blink yellow during replay
         statusLed.setBlinking(true, 500, 1000);
         replay = true; // Set replay mode
         DEBUG_LOG("TrainController: Playback started");
@@ -269,7 +308,8 @@ void handleButtons(int btn_no, bool pressed)
         break;
     case BUTTON_STOP:
         // If replay is active, stop replay and playback immediately
-        if (replay) {
+        if (replay)
+        {
             duploHub.stopReplay();
             replay = false;
             DEBUG_LOG("TrainController: STOP pressed during replay, replay stopped before emergency stop handling");
@@ -300,8 +340,8 @@ void handleButtons(int btn_no, bool pressed)
             duploHub.playSound((DuploEnums::DuploSound::STATION_DEPARTURE)); // Play departure sound
             delay(DELAY_TIME);                                               // Allow time for sound to play
             duploHub.setLedColor(DuploEnums::DuploColor::GREEN);             // Set LED to green
-            statusLed.setOff(); // LED off when stop is released
-            delay(DELAY_TIME); // Allow time for sound to play
+            statusLed.setOff();                                              // LED off when stop is released
+            delay(DELAY_TIME);                                               // Allow time for sound to play
         }
         DEBUG_LOG("TrainController: Emergency stop %s", emergencyStop ? "activated" : "deactivated");
         delay(DELAY_TIME);
@@ -372,7 +412,8 @@ static void detectedColorCb(DuploEnums::DuploColor color)
 {
     static bool whiteLightEnabled = false;
 
-    if (replay || recording) {
+    if (replay || recording)
+    {
         DEBUG_LOG("TrainController: Color sensor callback ignored during recording and replay");
         return;
     }
@@ -383,7 +424,7 @@ static void detectedColorCb(DuploEnums::DuploColor color)
     switch (color)
     {
     case DuploEnums::DuploColor::BLACK:
-        DEBUG_LOG("TrainController:  Detected Color: %d", DuploEnums::DuploColor::BLACK);   
+        DEBUG_LOG("TrainController:  Detected Color: %d", DuploEnums::DuploColor::BLACK);
         duploHub.setLedColor(DuploEnums::DuploColor::BLACK);
         statusLed.setColor(CRGB::Black);
         delay(DELAY_TIME);
@@ -466,11 +507,17 @@ static void detectedColorCb(DuploEnums::DuploColor color)
 #ifndef CALC_VOLTAGE_DELAY
 #define CALC_VOLTAGE_DELAY 5000 // ms, default if not defined elsewhere
 #endif
+
+/**
+ * @brief Handle voltage sensor updates with rate limiting.
+ * @param voltage Latest measured hub voltage in volts.
+ */
 static void detectedVoltageCb(float voltage)
 {
     static unsigned long lastExec = 0;
     unsigned long now = millis();
-    if (now - lastExec < CALC_VOLTAGE_DELAY) {
+    if (now - lastExec < CALC_VOLTAGE_DELAY)
+    {
         return;
     }
     lastExec = now;
@@ -490,13 +537,14 @@ static void detectedSpeedCb(int speed)
 }
 
 // Callback function when hub connects
-/**
- * @brief Callback function called when the hub is connected.
- *
- * Activates all relevant ports and registers sensor callbacks.
- */
 String duploHubAddress = "";
 
+/**
+ * @brief Perform post-connection initialization after the hub is connected.
+ *
+ * Activates all required hub peripherals, refreshes the activity timer, and
+ * restores the controller feedback state for normal operation.
+ */
 static void onHubConnected()
 {
     DEBUG_LOG("TrainController: Hub instance connected, starting initialization...");
@@ -535,7 +583,7 @@ static void onHubConnected()
 
     duploHub.setHubName("DuploTrain_1");
     delay(200);
-    
+
     duploHubAddress = String(duploHub.getHubAddress().c_str());
 
     DEBUG_LOG("TrainController: Connected to hub: %s", duploHub.getHubName().c_str());
@@ -566,12 +614,15 @@ void replayNextCommand()
     if (cmd == nullptr)
     {
         // If replay is no longer active, stop replay state and update LED
-        if (!duploHub.isReplayActive()) {
+        if (!duploHub.isReplayActive())
+        {
             replay = false;
             statusLed.setBlinking(false); // Stop blinking first
             statusLed.setOff();           // LED off when replay ends
             DEBUG_LOG("TrainController: No more commands to replay, stopping replay");
-        } else {
+        }
+        else
+        {
             DEBUG_LOG("TrainController: Not the time to replay command");
         }
         return;
@@ -650,9 +701,9 @@ void setup()
     configureEncoderButtonWakeup(false);
 
     // Initialize onboard RGB LED
-    statusLed.begin();                     // Initialize FastLED,,,,z
-    statusLed.setBrightness(100);          // Set brightness
-    
+    statusLed.begin();            // Initialize FastLED,,,,z
+    statusLed.setBrightness(100); // Set brightness
+
     const esp_sleep_wakeup_cause_t wakeCause = esp_sleep_get_wakeup_cause();
 
     // Update mode is entered only when encoder button is held LOW continuously for >= 2 seconds
@@ -662,23 +713,25 @@ void setup()
     encoderBtnHoldStartMs = 0;
 
     // If we woke from sleep, start green blink 5x as a visual confirmation.
-    if (wakeCause == ESP_SLEEP_WAKEUP_EXT0 || wakeCause == ESP_SLEEP_WAKEUP_EXT1 || wakeCause == ESP_SLEEP_WAKEUP_GPIO) {
+    if (wakeCause == ESP_SLEEP_WAKEUP_EXT0 || wakeCause == ESP_SLEEP_WAKEUP_EXT1 || wakeCause == ESP_SLEEP_WAKEUP_GPIO)
+    {
         startWakeupGreenBlink();
     }
-    
-    if (!wakeBlinkActive) {
-        statusLed.setColor(CRGB::Yellow);         // Set color to yellow during init
+
+    if (!wakeBlinkActive)
+    {
+        statusLed.setColor(CRGB::Yellow);      // Set color to yellow during init
         statusLed.setBlinking(true, 200, 300); // Blink: 200ms on, 300ms off
     }
 
     // setup push buttons and register callback
-    guiButtons.addButtonRange(BUTTON_RECORD, 430, 875);    // Button 1: Record sequence (nominal ~670)
-    guiButtons.addButtonRange(BUTTON_PLAY, 1115, 1505);    // Button 2: Play recorded sequence (nominal ~1320)
-    guiButtons.addButtonRange(BUTTON_STOP, 1745, 2095);    // Button 3: Emergency Stop (nominal ~1930)
-    guiButtons.addButtonRange(BUTTON_WATER, 2335, 2675);   // Button 4: Make sound fill up water (nominal ~2500)
-    guiButtons.addButtonRange(BUTTON_LIGHT, 2915, 3270);   // Button 5: Change lights (nominal ~3090)
-    guiButtons.addButtonRange(BUTTON_SOUND, 3510, 3870);   // Button 6: Sound (nominal ~3690)
-    guiButtons.registerButtonCallback(handleButtons); // Register button callback
+    guiButtons.addButtonRange(BUTTON_RECORD, 430, 875);  // Button 1: Record sequence (nominal ~670)
+    guiButtons.addButtonRange(BUTTON_PLAY, 1115, 1505);  // Button 2: Play recorded sequence (nominal ~1320)
+    guiButtons.addButtonRange(BUTTON_STOP, 1745, 2095);  // Button 3: Emergency Stop (nominal ~1930)
+    guiButtons.addButtonRange(BUTTON_WATER, 2335, 2675); // Button 4: Make sound fill up water (nominal ~2500)
+    guiButtons.addButtonRange(BUTTON_LIGHT, 2915, 3270); // Button 5: Change lights (nominal ~3090)
+    guiButtons.addButtonRange(BUTTON_SOUND, 3510, 3870); // Button 6: Sound (nominal ~3690)
+    guiButtons.registerButtonCallback(handleButtons);    // Register button callback
 
     // initialize rotary encoder and register callback
     rotaryEncoder.setEncoderType(EncoderType::FLOATING);
@@ -699,7 +752,8 @@ void setup()
     delay(200); // Allow time for BLE task to initialize
 
     DEBUG_LOG("TrainController: Ready - BLE task running, waiting for hub connection...");
-    if (!wakeBlinkActive) {
+    if (!wakeBlinkActive)
+    {
         statusLed.setOff();
     }
 
@@ -709,6 +763,9 @@ void setup()
     DEBUG_LOG("TrainController: Idle timer started (maxIdleTime=%d ms)", maxIdleTime);
 }
 
+/**
+ * @brief Trigger the green wakeup confirmation blink sequence.
+ */
 static void startWakeupGreenBlink()
 {
     constexpr int blinkTimes = 5;
@@ -722,6 +779,10 @@ static void startWakeupGreenBlink()
     statusLed.setBlinking(true, onMs, offMs, blinkTimes);
 }
 
+/**
+ * @brief Check whether the green ready-heartbeat may be displayed.
+ * @return `true` when the controller is idle and no warning or mode indicator has priority.
+ */
 static bool shouldShowReadyHeartbeat()
 {
     const bool noLowVoltageWarningPending = (detectedVoltage <= 0.0f) || (detectedVoltage >= LOW_VOLTAGE_THRESHOLD);
@@ -734,6 +795,9 @@ static bool shouldShowReadyHeartbeat()
            noLowVoltageWarningPending;
 }
 
+/**
+ * @brief Update the periodic ready-heartbeat indicator.
+ */
 static void updateReadyHeartbeat()
 {
     const unsigned long now = millis();
@@ -759,6 +823,9 @@ static void updateReadyHeartbeat()
     }
 }
 
+/**
+ * @brief Show a short red blink sequence before entering sleep.
+ */
 static void indicateEnteringSleep()
 {
     // WS2812 LEDs keep their last color while the MCU sleeps, so explicitly show “sleep now”.
@@ -767,7 +834,8 @@ static void indicateEnteringSleep()
     statusLed.setBlinking(true, 120, 120, 2);
 
     const unsigned long until = millis() + 800;
-    while ((long)(millis() - until) < 0) {
+    while ((long)(millis() - until) < 0)
+    {
         statusLed.update();
         delay(10);
     }
@@ -777,6 +845,11 @@ static void indicateEnteringSleep()
     delay(50);
 }
 
+/**
+ * @brief Convert an ESP sleep wake reason into a human-readable label.
+ * @param cause Wake reason reported by `esp_sleep_get_wakeup_cause()`.
+ * @return Constant string describing the wake source.
+ */
 static const char *wakeupCauseToString(esp_sleep_wakeup_cause_t cause)
 {
     switch (cause)
@@ -812,17 +885,26 @@ static const char *wakeupCauseToString(esp_sleep_wakeup_cause_t cause)
     }
 }
 
+/**
+ * @brief Check whether the configured encoder button pin is RTC-capable.
+ * @return `true` if the pin supports RTC wake functions.
+ */
 static bool encoderButtonIsRtcWakeCapable()
 {
     const gpio_num_t wakeGpio = (gpio_num_t)ENCODER_BTN;
     return rtc_gpio_is_valid_gpio(wakeGpio);
 }
 
+/**
+ * @brief Configure deep-sleep wakeup on the encoder button.
+ * @param enableHold `true` to keep RTC pad settings latched across deep sleep.
+ */
 static void configureEncoderButtonWakeup(bool enableHold)
 {
     const gpio_num_t wakeGpio = (gpio_num_t)ENCODER_BTN;
 
-    if (!rtc_gpio_is_valid_gpio(wakeGpio)) {
+    if (!rtc_gpio_is_valid_gpio(wakeGpio))
+    {
         DEBUG_LOG("TrainController: ENCODER_BTN GPIO %d is not RTC IO -> deep-sleep wake not possible", (int)wakeGpio);
         return;
     }
@@ -842,18 +924,25 @@ static void configureEncoderButtonWakeup(bool enableHold)
 
     // EXT1 wake on LOW level (single pin in ALL_LOW mode).
     esp_err_t err = esp_sleep_enable_ext1_wakeup((1ULL << ENCODER_BTN), ESP_EXT1_WAKEUP_ALL_LOW);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         DEBUG_LOG("TrainController: esp_sleep_enable_ext1_wakeup(GPIO%d, ALL_LOW) failed: %d", (int)wakeGpio, (int)err);
-    } else {
+    }
+    else
+    {
         DEBUG_LOG("TrainController: Deep-sleep wake configured on GPIO%d (EXT1 ALL_LOW)", (int)wakeGpio);
     }
 
-    if (enableHold) {
+    if (enableHold)
+    {
         rtc_gpio_hold_en(wakeGpio);
         gpio_deep_sleep_hold_en();
     }
 }
 
+/**
+ * @brief Configure light-sleep wakeup for the encoder button.
+ */
 static void configureEncoderButtonLightSleepWakeup()
 {
     const gpio_num_t wakeGpio = (gpio_num_t)ENCODER_BTN;
@@ -861,12 +950,14 @@ static void configureEncoderButtonLightSleepWakeup()
 
     // Light sleep GPIO wake works on any GPIO (RTC + digital IO).
     esp_err_t err = gpio_wakeup_enable(wakeGpio, GPIO_INTR_LOW_LEVEL);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         DEBUG_LOG("TrainController: gpio_wakeup_enable(%d) failed: %d", (int)wakeGpio, (int)err);
         return;
     }
     err = esp_sleep_enable_gpio_wakeup();
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         DEBUG_LOG("TrainController: esp_sleep_enable_gpio_wakeup() failed: %d", (int)err);
     }
 }
@@ -886,13 +977,13 @@ void checkStatus(DuploHub &duploHub)
         float cpuTemp = getCPUTemperature();
         DEBUG_LOG("CPU Temperature: %.2f °C", cpuTemp);
 
-        if(detectedVoltage < LOW_VOLTAGE_THRESHOLD && !(recording || replay))
+        if (detectedVoltage < LOW_VOLTAGE_THRESHOLD && !(recording || replay))
         {
             DEBUG_LOG("TrainController: Low voltage detected: %.2f V", detectedVoltage);
-            statusLed.setColor(CRGB::Red); // Set LED to red for low voltage
+            statusLed.setColor(CRGB::Red);            // Set LED to red for low voltage
             statusLed.setBlinking(true, 100, 100, 5); // Blink red
         }
-    
+
         lastStatusUpdate = millis();
     }
 }
@@ -905,7 +996,7 @@ void checkStatus(DuploHub &duploHub)
  */
 void esp_goto_sleep()
 {
-        DEBUG_LOG("TrainController: No user action for %d ms, entering deep sleep...", maxIdleTime);
+    DEBUG_LOG("TrainController: No user action for %d ms, entering deep sleep...", maxIdleTime);
 
     // Re-apply wake configuration right before sleeping in case runtime code changed GPIO routing.
     configureEncoderButtonWakeup(true);
@@ -916,7 +1007,8 @@ void esp_goto_sleep()
 #endif
     indicateEnteringSleep();
 
-    if (encoderButtonIsRtcWakeCapable()) {
+    if (encoderButtonIsRtcWakeCapable())
+    {
         // Enter deep sleep (wake via EXT0)
         esp_deep_sleep_start();
     }
@@ -940,42 +1032,53 @@ void loop()
     statusLed.update(); // Handle blinking
 
     // Keep UI state in sync when recording auto-stops in DuploHub (e.g. fixed buffer full).
-    if (recording && !duploHub.isRecordingCommandsEnabled()) {
+    if (recording && !duploHub.isRecordingCommandsEnabled())
+    {
         recording = false;
         statusLed.setOff();
         DEBUG_LOG("TrainController: Recording auto-stopped (record buffer full), LED turned off");
     }
 
     // Finalize non-blocking wake blink and hand control back to the ready heartbeat.
-    if (wakeBlinkActive && (long)(millis() - wakeBlinkEndMs) >= 0) {
+    if (wakeBlinkActive && (long)(millis() - wakeBlinkEndMs) >= 0)
+    {
         wakeBlinkActive = false;
         statusLed.setOff();
     }
 
     // Enter upload mode only after continuous >=2s button hold during startup phase.
-    if (uploadModeCheckActive) {
+    if (uploadModeCheckActive)
+    {
         const unsigned long now = millis();
         const bool btnLow = (digitalRead(ENCODER_BTN) == LOW);
 
-        if (btnLow) {
-            if (encoderBtnHoldStartMs == 0) {
+        if (btnLow)
+        {
+            if (encoderBtnHoldStartMs == 0)
+            {
                 encoderBtnHoldStartMs = now;
-            } else if (now - encoderBtnHoldStartMs >= 2000) {
+            }
+            else if (now - encoderBtnHoldStartMs >= 2000)
+            {
                 uploadModeCheckActive = false;
                 statusLed.setColor(CRGB::Blue);
                 statusLed.setBlinking(true, 100, 100); // Fast blue blink = upload mode
                 DEBUG_LOG("=== UPLOAD MODE ===");
                 DEBUG_LOG("Ready for firmware upload - waiting 10 seconds...");
-                for (int i = 0; i < 100; i++) {
+                for (int i = 0; i < 100; i++)
+                {
                     statusLed.update();
                     delay(100); // 10 seconds total
                 }
                 DEBUG_LOG("Upload window closed, continuing normal boot...");
             }
-        } else {
+        }
+        else
+        {
             encoderBtnHoldStartMs = 0;
             // After a short startup phase with no long hold, disable check completely.
-            if (now - uploadModeCheckStartMs > 3000) {
+            if (now - uploadModeCheckStartMs > 3000)
+            {
                 uploadModeCheckActive = false;
             }
         }
@@ -983,11 +1086,15 @@ void loop()
 
     // Periodic idle countdown log for debugging sleep timing.
     static unsigned long lastIdleLog = 0;
-    if (millis() - lastIdleLog >= 5000) {
+    if (millis() - lastIdleLog >= 5000)
+    {
         lastIdleLog = millis();
-        if (lastUserActionTime == 0) {
+        if (lastUserActionTime == 0)
+        {
             DEBUG_LOG("TrainController: Idle timer not started (lastUserActionTime=0)");
-        } else {
+        }
+        else
+        {
             const unsigned long idleMs = millis() - lastUserActionTime;
             const long remaining = (long)maxIdleTime - (long)idleMs;
             DEBUG_LOG("TrainController: Idle=%lu ms, remaining=%ld ms", idleMs, remaining);
@@ -995,12 +1102,11 @@ void loop()
     }
 
     // Check for idle time to enter deep sleep
-    if(lastUserActionTime != 0 && (millis() - lastUserActionTime) > maxIdleTime)
+    if (lastUserActionTime != 0 && (millis() - lastUserActionTime) > maxIdleTime)
     {
         esp_goto_sleep();
     }
 
- 
     guiButtons.updateButtons();
 
     if (duploHub.isConnected())
@@ -1011,7 +1117,7 @@ void loop()
             replayNextCommand();
         }
 
-         duploHub.processResponseQueue();
+        duploHub.processResponseQueue();
     }
 
     // Check Duplo Hub State

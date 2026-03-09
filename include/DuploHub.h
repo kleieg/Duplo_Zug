@@ -220,6 +220,13 @@ private:
 
 protected:
     // Sensor callback registration for lpf2hub
+    /**
+     * @brief Callback signature used by the Legoino color sensor bridge.
+     * @param hub Hub instance that emitted the event.
+     * @param portNumber Hub port that produced the reading.
+     * @param deviceType Device type associated with the reading.
+     * @param pData Raw payload buffer received from the LEGO protocol stack.
+     */
     typedef void (*ColorSensorCallback)(void *hub, byte portNumber, DeviceType deviceType, uint8_t *pData);
 
     /**
@@ -232,6 +239,13 @@ protected:
      */
     static void colorStabilityTimerCallback(void *arg);
 
+    /**
+     * @brief Callback signature used by the Legoino speed sensor bridge.
+     * @param hub Hub instance that emitted the event.
+     * @param portNumber Hub port that produced the reading.
+     * @param deviceType Device type associated with the reading.
+     * @param pData Raw payload buffer received from the LEGO protocol stack.
+     */
     typedef void (*SpeedSensorCallback)(void *hub, byte portNumber, DeviceType deviceType, uint8_t *pData);
 
     /**
@@ -239,6 +253,13 @@ protected:
      */
     static void staticSpeedSensorCallback(void *hub, byte portNumber, DeviceType deviceType, uint8_t *pData);
 
+    /**
+     * @brief Callback signature used by the Legoino voltage sensor bridge.
+     * @param hub Hub instance that emitted the event.
+     * @param portNumber Hub port that produced the reading.
+     * @param deviceType Device type associated with the reading.
+     * @param pData Raw payload buffer received from the LEGO protocol stack.
+     */
     typedef void (*VoltageSensorCallback)(void *hub, byte portNumber, DeviceType deviceType, uint8_t *pData);
 
     /**
