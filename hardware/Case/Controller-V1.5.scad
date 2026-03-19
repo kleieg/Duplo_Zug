@@ -151,14 +151,14 @@ rst_r = 1.5;
 
 // Reset Button
 rst_r1 = rst_r - 0.25;
-rst_h1 = 5;
+rst_h1 = 6;
 rst_r2 = rst_r + 1;
 rst_h2 = 1.5;
 
 
 // Ausbruch für Knöpfe
-btn_dx = 14.8;
-btn_dy = 14.8;
+btn_dx = 15;
+btn_dy = 15;
 
 
 // Button (1,1)  Record
@@ -259,7 +259,7 @@ module Knob(farbe)
     height = 13;
     r1 = 12;
     r2 = 10;
-    eps = -0.15;   // Klemmung bei Materialschrupfung um 0,2mm
+    eps = 0.15;   // Klemmung bei Materialschrupfung um 0,2mm
     w_wall = 2.5;
     r_hole = 3 - eps;
     
