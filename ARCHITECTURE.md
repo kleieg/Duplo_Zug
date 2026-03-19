@@ -1,843 +1,180 @@
+# Technical Architecture
 
+## System Summary
 
-# Technical Architecture Document
-
-**Author:** Ralf Zühlsdorff  
-**Copyright:** (c) 2025 Ralf Zühlsdorff  
-**License:** MIT License
-
----
-
-## System Overview
-
-The DUPLO Train Controller implements a robust, modular, event-driven architecture for LEGO train control, optimized for ESP32 dual-core systems. It extends the [Legoino](https://github.com/JorgePe/legoino) library by Jorge Pereira, adding hardened FreeRTOS primitives, queue-based communication, and application-level automation tailored to ESP32 hardware capabilities. The design leverages thread-safe queues and static callback wrappers to ensure reliable BLE communication, real-time sensor feedback, and responsive user control.
-
-Key runtime capabilities include:
-
-- Dual-core scheduling that dedicates Core 0 to BLE and sensor handling while Core 1 processes user interaction and replay automation.
-- A color stability timer that debounces rapid sensor transitions before events reach the UI layer.
-- Idle power management that enters sleep after 5 minutes of inactivity and wakes via the encoder button.
-- Startup protection that requires a continuous encoder hold (≥2s) before opening the 10-second firmware upload window.
-
-## Multi-Task Architecture
-
-```
-ESP32 Core 0 (Protocol Core)        ESP32 Core 1 (Application Core)
-├── BLE Stack (NimBLE)              ├── Arduino Main Loop
-├── BLE Task (DuploHub)             ├── TrainController Logic
-├── FreeRTOS Scheduler              ├── Application State Machine
-└── Hardware Interrupts             └── User Callbacks
-```
-
-| Task | Core | Priority | Stack Size | Timing |
-|------|------|----------|------------|--------|
-| Arduino Loop | 1 | 1 | 8KB | Continuous |
-| BLE Task | 0 | 2 | 4KB | 50ms cycle |
-| Idle Tasks | Both | 0 | 1KB | As needed |
-```cpp
-
-class DuploHub {
-private:
-    SemaphoreHandle_t connectionMutex;    // Protects connection state
-    QueueHandle_t commandQueue;           // Main → BLE task commands
-    QueueHandle_t responseQueue;          // BLE task → Main responses/events
-    TaskHandle_t bleTaskHandle;           // BLE task lifecycle
-    volatile bool connectionState;        // Atomic state variables
-    volatile bool connectingState;
-};
-```
-
-### Critical Sections
-
-```cpp
-
-// Example: Thread-safe connection state access
-bool DuploHub::isConnected() {
-    if (connectionMutex != nullptr) {
-        xSemaphoreTake(connectionMutex, portMAX_DELAY);
-        bool state = connectionState;
-        xSemaphoreGive(connectionMutex);
-        return state;
-    }
-    return hub.isConnected(); // Fallback if mutex not initialized
-}
-```
-
-### Command Queue Protocol
-
-```cpp
-
-// Command structure for inter-task communication
-typedef struct {
-    CommandType type;           // Command identifier
-    union {
-        struct { int speed; } motor;
-        struct { Color color; } led;
-        struct { char name[32]; } hubName;
-        // ... other command types ...
-    } data;
-} HubCommand;
-
-// Response structure for BLE → Main communication
-typedef struct {
-    ResponseType type;          // Response identifier (e.g., Detected_Color, Detected_Speed)
-    union {
-        struct { int detectedColor; } colorResponse;
-        struct { int detectedSpeed; } speedResponse;
-        struct { float detectedVoltage; } voltageResponse;
-        // ... other response types ...
-    } data;
-} HubResponse;
-```
-
-## Memory Management
-
-### Static Allocation Strategy
-- **Command Queue**: 10 × `sizeof(HubCommand)` = ~320 bytes
-- **Replay Recording Buffer**: 32 × `sizeof(HubCommand)` in fixed static array (`std::array`)
-- **Task Stacks**: BLE Task (4KB), Main Loop (8KB)
-- **Synchronization Objects**: ~100 bytes total
-- **String Buffers**: Fixed-size arrays for thread safety
-
-### Heap Usage Optimization
-- Minimal dynamic allocation
-- String operations use stack buffers
-- BLE operations handled by NimBLE stack
-- No memory leaks in main application code
-- Record/replay command capture is deterministic (fixed capacity, no dynamic growth at runtime)
+The DUPLO Train Controller NG uses an ESP32-S3 dual-core layout to separate BLE timing from user-interface logic. The firmware is structured in three layers:
 
-### Record/Replay Buffer Behavior
+1. `TrainController`: application logic, UI, sleep/wake, replay/record, user feedback
+2. `DuploHub`: thread-safe BLE abstraction with command and response queues
+3. `myLegoHub` plus Legoino/NimBLE: DUPLO-specific BLE protocol access
 
-- Command recording stores up to **32** commands.
-- When the fixed buffer is full, recording is **automatically disabled**.
-- UI state is synchronized in the main loop so recording LED feedback ends when auto-stop occurs.
+The current implementation emphasizes low perceived latency:
 
-## Communication Flow
+- connect callback work is no longer blocking the BLE task
+- post-connect initialization is staged in the main loop
+- reconnect scanning uses short scan windows
+- the controller distinguishes between `connected` and `ready`
 
-### Startup Sequence
+## Runtime Topology
 
-```mermaid
-sequenceDiagram
-    participant App as TrainController
-    participant Hub as DuploHub
-    participant BLE as BLE Task
-    participant LEGO as Lpf2Hub
+### Core assignment
 
-    App->>Hub: Constructor (initFreeRTOS)
-    Hub->>Hub: Create Mutex & Queue
-    App->>Hub: startBLETask()
-    Hub->>BLE: Create Task (Core 0)
-    BLE->>LEGO: hub.init() - Start scanning
-    LEGO-->>BLE: Device found callback
-    BLE->>LEGO: hub.connectHub()
-    BLE->>Hub: updateConnectionState(true)
-    Hub->>App: onConnectedCallback()
-```
+- Core 0: BLE stack and `DuploHub` task
+- Core 1: Arduino loop and application state machine
 
-### Command Execution Flow
+### Queue model
 
-```mermaid
-sequenceDiagram
-    participant App as TrainController
-    participant Queue as Command Queue
-    participant BLE as BLE Task
-    participant LEGO as Lpf2Hub
+- `commandQueue`: main loop to BLE task
+- `responseQueue`: BLE task to main loop
 
-    App->>Queue: setMotorSpeed(50)
-    Queue-->>BLE: Command available
-    BLE->>Queue: Dequeue command
-    BLE->>LEGO: setBasicMotorSpeed(port, 50)
-    LEGO-->>BLE: BLE transmission complete
-```
+### Shared synchronization
 
-## Error Handling Strategy
+- `connectionMutex`: protects cached connection and connecting flags
+- ESP timer plus spinlock: debounced color sensor stabilization
 
-### Failure Recovery Mechanisms
+## Connection Lifecycle
 
-1. **BLE Task Monitoring**: Main loop checks task health every 5 seconds
-2. **Connection Recovery**: Automatic reconnection with exponential backoff
-3. **Command Queue Overflow**: Non-blocking queue operations with warnings
-4. **Resource Cleanup**: Proper destruction in destructors and error paths
+### Initial connect
 
-### Error Categories
+1. `TrainController::setup()` initializes the UI and starts `DuploHub`
+2. `DuploHub` creates FreeRTOS primitives and starts a BLE worker task on Core 0
+3. The BLE task starts scanning for a DUPLO hub
+4. Once BLE link-up is detected, the application receives `onHubConnected()`
+5. The application starts a non-blocking hub initialization state machine
+6. Only after all required hub devices are activated does the controller enter the `ready` state
 
-| Category | Handling | Recovery |
-|----------|----------|----------|
-| BLE Connection Loss | Automatic retry | Background reconnection |
-| Task Creation Failure | Error logging | Fallback to synchronous mode |
-| Queue Full | Drop command + warning | Continue operation |
-| Memory Allocation | Error logging | Graceful degradation |
+### Ready semantics
 
-BLE reconnect attempt logs are rate-limited to one message every 10 seconds to avoid serial log flooding while disconnected.
+The implementation explicitly separates:
 
-## Performance Characteristics
+- BLE link connected
+- hub initialized and ready for commands
 
-### Latency Analysis
+This distinction exists because the DUPLO hub requires a short activation sequence after BLE connection before LED, sound and sensor commands are usable.
 
-| Operation | Typical Latency | Maximum Latency |
-|-----------|----------------|-----------------|
-| Motor Command | 50-100ms | 200ms |
-| LED Command | 30-80ms | 150ms |
-| Connection Detection | 1-3 seconds | 10 seconds |
-| State Query | <1ms | 5ms (mutex wait) |
+### Reconnect behavior
 
-### Throughput Capabilities
+Current reconnect tuning:
 
-- **Command Rate**: ~20 commands/second sustainable
-- **BLE Bandwidth**: ~1KB/second LEGO protocol data
-- **CPU Utilization**: ~15% Core 0, ~5% Core 1 during active operation
+- short reconnect scan window in `DuploHub`
+- throttled scan restarts while disconnected
+- shorter BLE supervision timeout for faster loss detection
 
-## Power Management & Wake Strategy
+Observed runtime result on hardware:
 
-The inactivity timer in `TrainController::loop()` transitions the controller into sleep mode after **300000 ms** (5 minutes) without user interaction.
+- reconnect after train power-cycle: about 2 to 3 seconds
+- train reacts immediately once green ready indication appears
 
-### Sleep Entry Flow
+## Post-Connect Initialization
 
-1. Re-apply encoder wake configuration immediately before sleeping.
-2. Signal sleep entry using a short red LED pattern.
-3. Turn status LED off and enter sleep.
+The post-connect sequence is intentionally staged from the main loop instead of the BLE callback context.
 
-### Preferred Wake Path (RTC-capable encoder pin)
+Reason:
 
-- RTC pin biasing is explicitly configured (`pullup`, `input-only`, RTC peripheral kept on).
-- Wake source is configured with `esp_sleep_enable_ext1_wakeup((1ULL << ENCODER_BTN), ESP_EXT1_WAKEUP_ALL_LOW)`.
-- GPIO hold state is managed across sleep to keep wake behavior stable.
+- connection callbacks are triggered from the BLE task
+- blocking delays there would stall command processing and make the train appear connected but unresponsive
 
-### Fallback Wake Path (non-RTC encoder pin)
+Current staged initialization steps:
 
-If the encoder pin cannot be used as RTC wake source, firmware uses light sleep wake:
+1. register application callbacks
+2. activate hub RGB light
+3. activate speaker
+4. activate color sensor
+5. activate speed sensor
+6. activate voltage sensor
+7. set hub name
+8. wait short settle period
+9. set `hubReady = true`
 
-- `gpio_wakeup_enable(..., GPIO_INTR_LOW_LEVEL)`
-- `esp_sleep_enable_gpio_wakeup()`
+## Sensor Processing
 
-### Wake UX and Diagnostics
+### Color sensor
 
-- Wake cause is logged at startup (`EXT1`, `GPIO`, etc.).
-- After wake from sleep, status LED blinks green 5 times and then returns to normal status indication.
+The color sensor is noisy on reflective surfaces. To reduce false triggers:
 
-### Upload Window Guard
+- raw color changes are collected in BLE context
+- a one-shot ESP timer waits for 250 ms stability
+- only stable transitions are pushed into `responseQueue`
 
-- Upload mode is only entered when encoder button is held LOW continuously for **≥2 seconds** during the startup check phase.
-- If triggered, a 10-second upload window is shown via fast blue LED blinking.
-- Short presses no longer trigger upload mode.
+### Voltage sensor
 
-## Bidirectional Sensor Data Architecture
+- voltage events are rate-limited in the application
+- low voltage warning is visualized on the controller LED
 
-### Queue Model
+### Speed sensor
 
-The firmware relies on two FreeRTOS queues to decouple the BLE task from the application loop:
+- significant changes are forwarded to the application
+- speed is normalized to `-100..100`
 
-```mermaid
-flowchart LR
-    subgraph Core1["Main Loop (Core 1)"]
-        TC["TrainController::loop<br/>• Rotary & buttons<br/>• processResponseQueue<br/>• record / replay"]
-    end
+## Record and Replay
 
-    subgraph Core0["BLE Task (Core 0)"]
-        BLE["DuploHub::bleTaskFunction<br/>• hub.connectHub()<br/>• processCommandQueue<br/>• static callbacks"]
-    end
+`DuploHub` stores outgoing commands in a fixed-size static buffer.
 
-    CommandQueue["commandQueue<br/>(10 items)"]:::queue
-    ResponseQueue["responseQueue<br/>(100 items)"]:::queue
+Current behavior:
 
-    TC -->|commands| CommandQueue -->|dispatch| BLE
-    BLE -->|responses| ResponseQueue -->|process| TC
+- maximum 32 recorded commands
+- recording stops automatically when buffer is full
+- replay runs once, then terminates cleanly
+- user input is restricted while replay is active
 
-    classDef queue fill:#f2f2f2,stroke:#555,stroke-width:1px;
-```
+## UI State Model
 
-- `commandQueue` carries `HubCommand` objects from the application to the BLE task (motor, sound, LED, sensor activation, name changes). Each command includes a timestamp so the recorder can normalize playback timing.
-- `responseQueue` returns `HubResponse` objects (color, speed, voltage updates) from the BLE task to the application. The queue depth of 100 entries absorbs bursts from the color sensor while the UI performs other work.
+### Controller status LED
 
+- yellow blinking: boot/startup
+- blue blinking: connected, still initializing
+- green blink burst: ready achieved
+- green short heartbeat: idle and ready
+- violet blinking: recording
+- yellow blinking: replay
+- red steady: emergency stop
+- white blink burst: disconnect
 
-### Color Stability Timer
+### Input gating
 
-Rapid color transitions generated by the DUPLO sensor are filtered by a one-shot `esp_timer` that fires after 250 ms of stability. The timer is created lazily by `ensureColorTimerInitialized()` and shared across callbacks via a `portMUX_TYPE` critical section. The timer callback:
+Buttons and encoder commands are ignored until both conditions are true:
 
-1. Compares the pending color against the last stable value.
-2. Enqueues a `HubResponse` only when the reading truly changes.
-3. Resets the pending color so the next sensor event will re-arm the timer.
+- hub connected
+- hub ready
 
-This approach lowers noise in the response queue without blocking the BLE task, and keeps user automation deterministic.
+This prevents the user from issuing commands into a not-yet-initialized hub.
 
-### Command & Event Flow
+## Power Management
 
-1. **Command path (Main → BLE)**
-   ```cpp
-   HubCommand cmd = {...};
-   sendCommand(cmd, pdMS_TO_TICKS(100));   // TrainController → DuploHub
-   // BLE task dequeues the command and forwards it via Legoino APIs
-   ```
+### Sleep
 
-2. **Sensor path (BLE → Main)**
-   ```cpp
-   staticColorSensorCallback(...)  // BLE context
-     ↳ ensureColorTimerInitialized()
-     ↳ esp_timer_start_once()
+- 5 minutes inactivity timeout
+- red pre-sleep indication
+- deep sleep preferred via encoder RTC wake
+- light sleep fallback via GPIO wake if RTC wake is not available
 
-   colorStabilityTimerCallback(...)
-     ↳ HubResponse response{Detected_Color, ...};
-     ↳ xQueueSend(responseQueue, ...);
+### Wake
 
-   TrainController::processResponseQueue()
-     ↳ switch(response.type) { ... detectedColorCb(...) ... }
-   ```
+- wake only by encoder button
+- green wake blink acknowledgment
+- startup upload mode requires continuous encoder hold for at least 2 seconds
 
-3. **Record / Replay integration**
-   - When recording is enabled, every outbound `HubCommand` is copied into `commandBuffer` together with its timestamp.
-    - `replayCommands()` normalizes timestamps and replays through `sendCommand()` while the main loop checks `getNextReplayCommand()` to maintain timing.
+## Project-Owned Modules
 
-### Memory Usage Snapshot
+- [src/TrainController.cpp](src/TrainController.cpp): application state machine and UX logic
+- [src/DuploHub.cpp](src/DuploHub.cpp): BLE worker, queues, sensors, replay/record
+- [src/myLegoHub.cpp](src/myLegoHub.cpp): DUPLO-specific message helpers
+- [src/ADCButton.cpp](src/ADCButton.cpp): ADC ladder button handling
+- [src/StatusLED.cpp](src/StatusLED.cpp): single RGB LED state machine
+- [src/SystemMemory.cpp](src/SystemMemory.cpp): diagnostics helpers
+- [src/debug.cpp](src/debug.cpp): mutex-protected debug output
 
-| Queue | Direction | Capacity | Approx. item size | Purpose |
-|-------|-----------|----------|-------------------|---------|
-| `commandQueue` | Main → BLE | 10 items | ~48 B (`HubCommand`) | Motor, LED, sound, sensor activation, hub name |
-| `responseQueue` | BLE → Main | 100 items | ~16 B (`HubResponse`) | Color, speed, voltage notifications |
+## Vendored Dependencies
 
-Additional shared resources include the connection mutex (~92 B), the BLE task stack (4 KB), and the color stability timer (control block provided by ESP timer service).
+The repository vendors third-party code under `lib/`.
 
-### Extending `HubCommand` / `HubResponse`
+- `lib/Legoino`: protocol library used by the project, with project-local adjustments
+- `lib/NimBLE-Arduino`: BLE stack used by Legoino
 
-New device capabilities can be exposed by adding enum values and union members in `include/DuploHub.h`. The queue infrastructure already supports arbitrary payloads as long as the structs remain POD types.
+Project documentation and code comments are maintained primarily for project-owned files. Vendored code is only updated where project-specific modifications are made.
 
-### Multiple Hub Support
+## Current Open Architectural Topics
 
-Managing several train hubs simply requires instantiating multiple `DuploHub` objects—each one provisions its own command/response queues, timer handle, and BLE task instance.
-
-## Debug and Monitoring Infrastructure
-
-
-### Logging and Debugging
-
-The system uses a mutex-protected debug logging macro (`DEBUG_LOG`) for thread-safe output from both main and BLE tasks. Logging levels can be adjusted for error, warning, info, and debug output.
-
-
-### Runtime Statistics
-
-System monitoring functions (e.g., `printMemoryInfo()`) are available to report free heap, BLE task stack usage, and queue status for debugging and performance analysis.
-
-## Security Considerations
-
-### BLE Security
-- No pairing/bonding implemented (LEGO hubs don't require it)
-- Connection based on service UUID matching
-- Limited to LEGO protocol commands only
-
-### Code Security
-- No dynamic code execution
-- Fixed-size buffers prevent overflows
-- Input validation on all external data
-
-
-## Documentation and Code Quality
-
-All major classes and functions are documented using Doxygen-style comments, including parameter and return value descriptions. Each file includes author, copyright, and the full MIT license.
-
-**Future Enhancement Opportunities:**
-
-1. **Sensor Integration**: Support for LEGO speed sensor
-2. **Multiple Trains**: Coordinate multiple train hubs, e.g. pinning controller to specific train
-
-
-## Complete Sensor Processing Chain Analysis
-
-This section provides a complete trace of how a sensor value (e.g., color detection) flows through all layers of the architecture, from physical hardware to application callback.
-
-### **Layer 1: Physical Hardware → BLE Radio**
-```
-DUPLO Color Sensor Hardware
-├── Detects color change (e.g., RED)
-├── Generates sensor data packet
-└── Transmits via BLE to ESP32
-```
-- **📍 Location**: DUPLO train hub hardware  
-- **📝 Data Format**: Raw BLE characteristic update with color data
-- **⏱️ Timing**: Immediate hardware response to color change
-
-### **Layer 2: ESP32 BLE Stack → NimBLE Library**
-```cpp
-// NimBLE Arduino Library (Core 0)
-// Receives BLE characteristic notification
-// Parses BLE packet and routes to registered callback
-```
-- **📍 Running on**: Core 0 (BLE task context)  
-- **📝 Data Format**: Parsed BLE packet with device type and raw sensor bytes
-- **⏱️ Timing**: ~5-10ms BLE packet processing
-
-### **Layer 3: Lpf2Hub Library Callback**
-```cpp
-// File: Legoino/src/Lpf2Hub.cpp
-// Internal Lpf2Hub processing - calls registered device callback
-void Lpf2Hub::notifyCallback(NimBLERemoteCharacteristic* pChar, uint8_t* pData, size_t length) {
-    // ... BLE packet parsing ...
-    
-    // Calls our registered callback for the port
-    if (_portDeviceCallback[portNumber] != nullptr) {
-        _portDeviceCallback[portNumber](this, portNumber, deviceType, pData);
-        //                                ↑ This calls our wrapper function
-    }
-}
-```
-- **📍 Running on**: Core 0 (BLE task context)  
-- **📝 Purpose**: LEGO Powered Up protocol parsing and routing
-- **⏱️ Timing**: ~2-5ms protocol parsing
-
-### **Layer 4: DuploHub Static Callback Wrapper**
-```cpp
-void DuploHub::staticColorSensorCallback(void *hub,
-                                         byte portNumber,
-                                         DeviceType deviceType,
-                                         uint8_t *pData) {
-    myLegoHub *myHub = static_cast<myLegoHub *>(hub);
-    (void)portNumber;
-
-    if (deviceType != DeviceType::DUPLO_TRAIN_BASE_COLOR_SENSOR) {
-        return;
-    }
-
-    int detectedColor = myHub->parseColor(pData);
-    if (detectedColor < DuploEnums::DuploColor::BLACK ||
-        detectedColor > DuploEnums::DuploColor::WHITE) {
-        return; // Ignore out-of-range values entirely
-    }
-
-    if (!ensureColorTimerInitialized()) {
-        HubResponse response{};
-        response.type = Detected_Color;
-        response.data.colorResponse.detectedColor = static_cast<DuploEnums::DuploColor>(detectedColor);
-        xQueueSend(instance->responseQueue, &response, pdMS_TO_TICKS(100));
-        return;
-    }
-
-    bool restartTimer = false;
-
-    portENTER_CRITICAL(&colorTimerMutex);
-    if (pendingColor != detectedColor) {
-        pendingColor = detectedColor;
-        restartTimer = true;
-    } else if (!esp_timer_is_active(colorStabilityTimer)) {
-        restartTimer = true;
-    }
-    portEXIT_CRITICAL(&colorTimerMutex);
-
-    if (restartTimer) {
-        esp_timer_stop(colorStabilityTimer);
-        esp_timer_start_once(colorStabilityTimer, COLOR_SETTLE_DELAY_US);
-    }
-}
-```
-- **📍 Running on**: Core 0 (BLE task context)
-- **🔧 Key Operations**: Parses raw Legoino payloads, primes the debounce timer, and falls back to immediate queueing if the timer handle is unavailable.
-
-### **Layer 5: Color Stability Timer Callback**
-```cpp
-void DuploHub::colorStabilityTimerCallback(void *arg) {
-    (void)arg;
-    int colorToEmit = -1;
-
-    portENTER_CRITICAL(&colorTimerMutex);
-    if (pendingColor >= DuploEnums::DuploColor::BLACK &&
-        pendingColor <= DuploEnums::DuploColor::WHITE) {
-        if (pendingColor != lastStableColor) {
-            colorToEmit = pendingColor;
-            lastStableColor = pendingColor;
-        }
-    }
-    pendingColor = -1;
-    portEXIT_CRITICAL(&colorTimerMutex);
-
-    if (colorToEmit == -1) {
-        return; // Nothing new to report
-    }
-
-    HubResponse response{};
-    response.type = Detected_Color;
-    response.data.colorResponse.detectedColor = static_cast<DuploEnums::DuploColor>(colorToEmit);
-    xQueueSend(instance->responseQueue, &response, pdMS_TO_TICKS(100));
-}
-```
-- **📍 Running on**: ESP timer service (Core 0 context)
-- **🔧 Key Operations**: Stable-color detection, queueing of color events, deduplication of unchanged values.
-
-### **Layer 6: TrainController Response Processing**
-```cpp
-void DuploHub::processResponseQueue() {
-    if (responseQueue == nullptr) {
-        return;
-    }
-
-    HubResponse response;
-    while (xQueueReceive(responseQueue, &response, 0) == pdTRUE) {
-        switch (response.type) {
-            case Detected_Color:
-                if (detectedColorCallback != nullptr) {
-                    detectedColorCallback(response.data.colorResponse.detectedColor);
-                }
-                break;
-            case Detected_Speed:
-                if (detectedSpeedCallback != nullptr) {
-                    detectedSpeedCallback(response.data.speedResponse.detectedSpeed);
-                }
-                break;
-            case Detected_Voltage:
-                if (detectedVoltageCallback != nullptr) {
-                    detectedVoltageCallback(response.data.voltageResponse.detectedVoltage);
-                }
-                break;
-        }
-    }
-}
-```
-- **📍 Running on**: Core 1 (main application loop)
-- **🔧 Key Operations**: Non-blocking dequeue until empty, invocation of application callbacks.
-
-### **Layer 7: TrainController Application Logic**
-```cpp
-static void detectedColorCb(DuploEnums::DuploColor color) {
-    if (replay) {
-        DEBUG_LOG("TrainController: Color sensor callback ignored during replay");
-        return;
-    }
-
-    DEBUG_LOG("TrainController:  Detected Color: %d", color);
-    detectedColor = color;
-
-    switch (color) {
-        case DuploEnums::DuploColor::BLACK:
-            duploHub.setLedColor(DuploEnums::DuploColor::BLACK);
-            statusLed.setColor(CRGB::Black);
-            delay(DELAY_TIME);
-            break;
-        case DuploEnums::DuploColor::RED:
-            emergencyStop = !emergencyStop;
-            statusLed.setColor(CRGB::Red);
-            statusLed.setBlinking(true, 250, 250, 3);
-            duploHub.playSound(DuploEnums::DuploSound::BRAKE);
-            break;
-        // Additional color cases (YELLOW, BLUE, WHITE, etc.) follow the same pattern.
-    }
-}
-```
-- **📍 Running on**: Core 1 (main application loop)
-- **🔧 Key Operations**: Applies rule-based automation (emergency stop toggling, sounds, motor/speed control, LED feedback) and updates user-visible state.
-
-### **Layer 8: Application Callback (TrainController)**
-```cpp
-// File: src/TrainController_Extended.cpp - Line ~62
-void onColorDetected(int color, byte port) {
-    Serial.print("TrainController Extended: Color detected - ");
-    Serial.print(LegoinoCommon::ColorStringFromColor(color).c_str());
-    Serial.print(" on port ");
-    Serial.println(port);
-    
-    lastDetectedColor = color;
-    
-    // Set LED to detected color
-    duploHub.setLedColor((Color)color);
-    
-    // Control train based on color
-    if (color == (byte)Color::RED) {
-        Serial.println("TrainController Extended: RED detected - STOP");
-        duploHub.stopMotor();  // ← This triggers another command queue operation
-    } 
-    else if (color == (byte)Color::GREEN) {
-        Serial.println("TrainController Extended: GREEN detected - FAST (speed 50)");
-        duploHub.setMotorSpeed(50);  // ← Command flows back Main → BLE via commandQueue
-    }
-    // ... other colors ...
-}
-```
-- **📍 Running on**: Core 1 (Main task context)  
-- **📝 Purpose**: Application-specific logic and train control decisions
-- **🔧 Result**: Motor control commands are queued back to BLE task
-- **⏱️ Timing**: User code execution time varies
-
-### Complete Processing Timeline
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        SENSOR PROCESSING TIMELINE                       │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│ Time 0ms:   DUPLO sensor detects RED color                             │
-│ Time 5ms:   BLE packet transmitted to ESP32                            │
-│ Time 10ms:  NimBLE receives and parses BLE characteristic              │
-│ Time 15ms:  DuploHub::staticColorSensorCallback stores candidate color │
-│ Time 20ms:  esp_timer_start_once arms 250 ms stability window          │
-│ Time 265ms: colorStabilityTimerCallback enqueues stable color          │
-│ Time 270ms: TrainController::loop() drains duploHub.processResponseQueue│
-│ Time 275ms: detectedColorCb() applies automation rules                 │
-│ Time 280ms: duploHub.stopMotor() queued to commandQueue (if required)  │
-│ Time 320ms: BLE task dequeues stop command and forwards to hub         │
-│ Time 360ms: DUPLO train motor confirms stop                            │
-│                                                                         │
-│ TOTAL LATENCY: ~360ms from sensor detection to motor action            │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### Processing Chain Benefits
-
-#### **Thread Safety**
-- ✅ **No shared memory**: All data passes through FreeRTOS queues
-- ✅ **Atomic operations**: Queue operations are interrupt-safe
-- ✅ **No race conditions**: Clear producer/consumer pattern
-
-#### **Performance**
-- ✅ **Non-blocking**: Main loop never waits for BLE operations
-- ✅ **Deterministic debounce**: 250 ms timer filters noisy color transitions
-- ✅ **Predictable latency**: ~360 ms sensor-to-action including stability window
-
-#### **Reliability**
-- ✅ **Error handling**: Queue overflow detection and logging
-- ✅ **Data integrity**: Timestamped sensor data with port information
-- ✅ **Graceful degradation**: System continues if callbacks fail
-
-#### **Scalability**
-- ✅ **Multiple sensors**: Same pattern works for color, distance, button
-- ✅ **Configurable queues**: Queue sizes can be adjusted for performance
-- ✅ **Extensible**: Easy to add new sensor types and callbacks
-
-
-## Complete Command Processing Chain Analysis
-
-While the sensor processing flows BLE → Main, command processing flows in the opposite direction. Here's the complete analysis for a `setMotorSpeed(50)` command:
-
-### **Layer 1: Application Command (TrainController)**
-```cpp
-// File: src/TrainController_Extended.cpp - Line ~75
-void onColorDetected(int color, byte port) {
-    // User application logic
-    if (color == (byte)Color::GREEN) {
-        duploHub.setMotorSpeed(50);  // ← This is where our analysis starts
-    }
-}
-```
-- **📍 Running on**: Core 1 (Main task - Arduino loop context)
-- **📝 Purpose**: Application-level decision to change motor speed
-- **⏱️ Timing**: Immediate function call
-
-### **Layer 2: DuploHub Public API (Hardware Abstraction)**
-```cpp
-// File: include/DuploHub_Extended.h - Line ~108 (Legacy wrapper)
-void setMotorSpeed(int speed) { setMotorSpeed_ThreadSafe(speed); }
-```
-- **📍 Running on**: Core 1 (Main task context)
-- **📝 Purpose**: Backward compatibility wrapper - immediately calls thread-safe version
-- **⏱️ Timing**: ~1µs function call overhead
-
-### **Layer 3: DuploHub Protected Thread-Safe Implementation**
-```cpp
-// File: src/DuploHub_Extended.cpp - Line ~173 (from base DuploHub)
-void DuploHub::setMotorSpeed_ThreadSafe(int speed) {
-    if (commandQueue != nullptr) {
-        HubCommand cmd;
-        cmd.type = CMD_MOTOR_SPEED;
-        cmd.data.motor.speed = speed;
-        
-        if (xQueueSend(commandQueue, &cmd, pdMS_TO_TICKS(100)) != pdTRUE) {
-            Serial.println("WARNING: Failed to queue motor speed command");
-        }
-    } else {
-        // Fallback to direct call if queue not initialized
-        hub.setBasicMotorSpeed(motorPort, speed);
-    }
-}
-```
-- **📍 Running on**: Core 1 (Main task context)
-- **📝 Purpose**: Thread-safe command packaging and queuing
-- **🔧 Key Operations**:
-  - Creates `HubCommand` struct with `CMD_MOTOR_SPEED` type
-  - Packages speed value (50) into command data
-  - Uses `xQueueSend()` to send to BLE task (100ms timeout)
-- **⏱️ Timing**: ~1-3ms for struct creation and queue operation
-
-### **Layer 4: FreeRTOS Command Queue (Inter-Core Communication)**
-```
-FreeRTOS Queue: commandQueue
-- Queue Size: 10 commands
-- Item Size: sizeof(HubCommand) ~40 bytes
-- Timeout: 100ms (blocking if queue full)
-- Direction: Core 1 → Core 0
-```
-- **📍 Location**: FreeRTOS kernel space
-- **📝 Purpose**: Thread-safe communication between cores
-- **🔧 Mechanism**: Command waits in queue until BLE task processes it
-- **⏱️ Timing**: ~1ms queue operation + variable wait time
-
-### **Layer 5: BLE Task Command Processing Loop**
-```cpp
-// File: src/DuploHub_Extended.cpp - Line ~290 (from base DuploHub)
-void DuploHub::bleTaskFunction() {
-    const unsigned long CONNECTION_CHECK_INTERVAL = 1000;
-    
-    while (true) {
-        unsigned long currentTime = millis();
-        
-        if (currentTime - lastConnectionCheck >= CONNECTION_CHECK_INTERVAL) {
-            updateBLE();
-            lastConnectionCheck = currentTime;
-        }
-        
-        // Process command queue more frequently for responsiveness
-        processCommandQueue();  // ← Our command gets processed here
-        
-        vTaskDelay(pdMS_TO_TICKS(50)); // 50ms delay
-    }
-}
-```
-- **📍 Running on**: Core 0 (Dedicated BLE task)
-- **📝 Purpose**: Background command processing with 50ms polling interval
-- **⏱️ Timing**: Commands processed every 50ms maximum
-
-### **Layer 6: Command Queue Dequeuing and Execution**
-```cpp
-// File: src/DuploHub.cpp - processCommandQueue()
-void DuploHub::processCommandQueue()
-{
-    if (commandQueue == nullptr)
-        return;
-
-    HubCommand cmd;
-
-    while (xQueueReceive(commandQueue, &cmd, 0) == pdTRUE)
-    {
-        if (!hub.isConnected())
-        {
-            DEBUG_LOG("BLE Task: Skipping command - hub not connected");
-            continue;
-        }
-
-        switch (cmd.type)
-        {
-        case CommandType::CMD_MOTOR_SPEED:
-            DEBUG_LOG("BLE Task: Setting motor speed to %d", cmd.data.motor.speed);
-            hub.setBasicMotorSpeed((byte)DuploEnums::DuploTrainHubPort::MOTOR, cmd.data.motor.speed);
-            delay(20);
-            break;
-
-        case CommandType::CMD_STOP_MOTOR:
-            DEBUG_LOG("BLE Task: Stopping motor");
-            hub.stopBasicMotor((byte)DuploEnums::DuploTrainHubPort::MOTOR);
-            delay(20);
-            break;
-
-        case CommandType::CMD_SET_LED_COLOR:
-            DEBUG_LOG("BLE Task: Setting LED color to %d", cmd.data.led.color);
-            hub.setLedColor((Color)cmd.data.led.color);
-            delay(200);
-            break;
-
-        // ... additional command handlers (rename hub, play sound, activate sensors) ...
-        }
-    }
-}
-```
-- **📍 Running on**: Core 0 (BLE task context)
-- **📝 Purpose**: Drain the command queue and forward actions to the Powered Up hub
-- **🔧 Key Operations**:
-  - Non-blocking `xQueueReceive` loop guarded by connection state checks
-  - Dispatches to Legoino primitives with minimal inter-command delays
-  - Handles LED, sound, sensor activation, and replay traffic uniformly
-- **⏱️ Timing**: <2 ms per iteration plus command-specific BLE delays
-
-### **Layer 7: Lpf2Hub Protocol Implementation**
-```cpp
-// From Legoino library - Lpf2Hub.cpp
-hub.setBasicMotorSpeed(motorPort, cmd.data.motor.speed);
-//                     Port A,    50
-
-// Internal Lpf2Hub processing:
-void Lpf2Hub::setBasicMotorSpeed(byte port, int speed) {
-    // Convert speed to LEGO protocol format
-    // Create BLE characteristic write command
-    // Format: [Port][Command][Speed_Low][Speed_High]
-    uint8_t setMotorCommand[] = {0x81, port, 0x11, 0x51, 0x00, speed};
-    writeValue(setMotorCommand, 6);
-}
-```
-- **📍 Running on**: Core 0 (BLE task context)
-- **📝 Purpose**: LEGO Powered Up protocol implementation
-- **🔧 Operations**:
-  - Converts speed (50) to protocol format
-  - Creates BLE characteristic write with motor command
-  - Handles protocol-specific details and checksums
-- **⏱️ Timing**: ~5-10ms for protocol formatting
-
-### **Layer 8: NimBLE Stack & Hardware**
-```cpp
-// NimBLE Arduino Library + ESP32 Hardware
-writeValue() → NimBLE characteristic write → BLE radio transmission
-```
-- **📍 Running on**: Core 0 (BLE task) + Hardware radio
-- **📝 Purpose**: Actual Bluetooth communication to DUPLO hub
-- **🔧 Operations**:
-  - BLE GATT characteristic write
-  - Bluetooth LE packet transmission to DUPLO hub
-  - Hardware radio interface and antenna
-- **⏱️ Timing**: ~10-20ms for BLE transmission
-
-### **Layer 9: DUPLO Hub Hardware Response**
-```
-DUPLO Train Hub Hardware
-├── Receives BLE packet with motor command
-├── Parses LEGO Powered Up protocol
-├── Applies PWM signal to motor (speed 50)
-└── Motor starts rotating at specified speed
-```
-- **📍 Location**: DUPLO train hub hardware
-- **📝 Purpose**: Physical motor control execution
-- **⏱️ Timing**: ~5-10ms hardware response
-
-### Complete Command Processing Timeline
-
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        COMMAND PROCESSING TIMELINE                     │
-├────────────────────────────────────────────────────────────────────────┤
-│                                                                        │
-│ Time 0ms:   Application calls duploHub.setMotorSpeed(50)               │
-│ Time 1ms:   Legacy wrapper calls setMotorSpeed_ThreadSafe(50)          │
-│ Time 3ms:   Command packaged and queued to commandQueue                │
-│ Time 4ms:   Command waits in FreeRTOS queue (Core 1 → Core 0)          │
-│ Time ~25ms: BLE task processes command queue (max 50ms interval)       │
-│ Time 27ms:  processCommandQueue() dequeues and executes command        │
-│ Time 35ms:  Lpf2Hub formats LEGO protocol packet                       │
-│ Time 45ms:  NimBLE transmits BLE packet to DUPLO hub                   │
-│ Time 55ms:  DUPLO hub receives and processes command                   │
-│ Time 60ms:  DUPLO train motor starts rotating at speed 50              │
-│                                                                        │
-│ TOTAL LATENCY: ~60ms from function call to physical motor response     │
-└────────────────────────────────────────────────────────────────────────┘
-```
-
-### Command vs. Sensor Processing Comparison
-
-| **Aspect** | **Command Processing** | **Sensor Processing** |
-|------------|----------------------|----------------------|
-| **Direction** | Main Task → BLE Task | BLE Task → Main Task |
-| **Trigger** | Application function call | Hardware sensor event |
-| **Queue Type** | commandQueue (10 items) | responseQueue (100 items) |
-| **Latency** | ~60ms (function → motor) | ~360ms (sensor → automation) |
-| **Frequency** | On-demand (user commands) | Continuous (sensor events) |
-| **Error Handling** | 100ms timeout, fallback | 100ms enqueue window, drop on timeout |
-| **Criticality** | Medium (delayed commands OK) | High (stable automation feedback) |
-
-### Command Processing Benefits
-
-#### **Reliability**
-- ✅ **100ms timeout**: Commands don't get lost, fallback to direct calls
-- ✅ **Connection checking**: Commands only execute when hub is connected
-- ✅ **Queue overflow handling**: System reports but continues functioning
-- ✅ **Professional logging**: Every command execution is logged
-
-#### **Performance**
-- ✅ **Non-blocking application**: Main loop never waits for BLE operations
-- ✅ **Batch processing**: Multiple commands processed in sequence
-- ✅ **Predictable latency**: ~60ms maximum command-to-execution time
-- ✅ **Efficient queuing**: Minimal memory and CPU overhead
-
-#### **Architecture Benefits**
-- ✅ **Thread safety**: No shared memory, all communication via queues
-- ✅ **Clean separation**: Application logic isolated from BLE complexity
-- ✅ **Extensible design**: Easy to add new command types
-- ✅ **Professional debugging**: Comprehensive logging at each layer
+- continue facade consolidation through `myLegoHub`
+- optional preferred-train pairing strategy
+- possible further cleanup of debug/logging granularity

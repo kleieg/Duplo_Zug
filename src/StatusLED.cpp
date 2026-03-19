@@ -1,4 +1,18 @@
 
+/**
+ * @file StatusLED.cpp
+ * @brief Implementation of the single-pixel status LED state machine.
+ *
+ * Provides the FastLED-backed implementation for steady colors, finite blink bursts and
+ * continuous blink patterns used by the controller UI.
+ *
+ * @author Ralf Zühlsdorff
+ * @date 2025
+ *
+ * @copyright
+ * MIT License
+ */
+
 #include "StatusLED.h"
 
 /**
@@ -23,24 +37,24 @@ void StatusLED::begin()
         // Common pins: 48 for ESP32-S3-DevKitC-1
         switch (_pin)
         {
-            case 48:
-                FastLED.addLeds<NEOPIXEL, 48>(_leds, 1);
-                break;
-            case 2:
-                FastLED.addLeds<NEOPIXEL, 2>(_leds, 1);
-                break;
-            case 8:
-                FastLED.addLeds<NEOPIXEL, 8>(_leds, 1);
-                break;
-            default:
-                // Default to pin 48 if pin not specifically supported
-                FastLED.addLeds<NEOPIXEL, 48>(_leds, 1);
-                break;
+        case 48:
+            FastLED.addLeds<NEOPIXEL, 48>(_leds, 1);
+            break;
+        case 2:
+            FastLED.addLeds<NEOPIXEL, 2>(_leds, 1);
+            break;
+        case 8:
+            FastLED.addLeds<NEOPIXEL, 8>(_leds, 1);
+            break;
+        default:
+            // Default to pin 48 if pin not specifically supported
+            FastLED.addLeds<NEOPIXEL, 48>(_leds, 1);
+            break;
         }
         FastLED.setBrightness(50);
         _initialized = true;
     }
-    
+
     _leds[0] = _color;
     FastLED.show();
     _dirty = false;
@@ -92,7 +106,6 @@ void StatusLED::setOff()
     }
 }
 
-
 /**
  * @brief Update the LED state - call this regularly in your main loop
  * Handles blinking patterns if enabled
@@ -103,7 +116,7 @@ void StatusLED::update()
     {
         return; // Not initialized yet
     }
-    
+
     if (!_blinking)
     {
         // If not blinking, just ensure the LED shows the current color
@@ -120,37 +133,37 @@ void StatusLED::update()
         }
         return;
     }
-    
+
     // Check if finite blinking is complete
     if (_blinkTimes > 0 && _currentBlinks >= _blinkTimes)
     {
         // Finite blinking is complete, stop blinking and turn LED off
         _blinking = false;
-        _color = CRGB::Black; // Also reset color to black
+        _color = CRGB::Black;   // Also reset color to black
         _leds[0] = CRGB::Black; // Turn LED off after finite blinks
         _dirty = true;
         FastLED.show();
         _dirty = false;
         return;
     }
-    
+
     unsigned long currentTime = millis();
     unsigned long elapsed = currentTime - _lastUpdate;
-    
+
     // Calculate the position in the blink cycle
     unsigned long cycleTime = _ontime + _interval;
     unsigned long cyclePosition = elapsed % cycleTime;
-    
+
     // Check if we've completed a full cycle to increment blink counter
     bool currentlyOn = (cyclePosition < _ontime);
-    
+
     // Detect transition from off to on (start of new blink)
     if (currentlyOn && !_lastWasOn && _blinkTimes > 0)
     {
         _currentBlinks++;
     }
     _lastWasOn = currentlyOn;
-    
+
     if (currentlyOn)
     {
         // LED should be on (showing the color)
@@ -190,11 +203,11 @@ void StatusLED::setBlinking(bool blinking, int ontime, int interval, int times)
     _ontime = ontime;
     _interval = interval;
     _blinkTimes = times;
-    _currentBlinks = 0;  // Reset blink counter
-    _lastWasOn = false;  // Reset state tracking
+    _currentBlinks = 0; // Reset blink counter
+    _lastWasOn = false; // Reset state tracking
     _lastUpdate = millis();
     _dirty = true;
-    
+
     if (!_blinking && _initialized)
     {
         // If blinking is disabled, set LED to solid color
@@ -203,5 +216,3 @@ void StatusLED::setBlinking(bool blinking, int ontime, int interval, int times)
         _dirty = false;
     }
 }
-
-

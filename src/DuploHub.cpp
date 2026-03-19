@@ -362,7 +362,7 @@ void DuploHub::replayCommands()
 
     recordCommandsEnabled = false;
 
-    // Normalize timestamps - set first command to time 0 and adjust all others relative to it
+    // Normalize timestamps so replay compares only elapsed time since replay start.
     if (commandBufferCount > 0)
     {
         originalStartTime = commandBuffer[0].timestamp;
@@ -474,7 +474,7 @@ void DuploHub::stopReplay()
  */
 BaseType_t DuploHub::sendCommand(const HubCommand &cmd, TickType_t timeout)
 {
-    // Store command in buffer if recording is enabled
+    // Record the queue payload before sending so replay uses the exact original command sequence.
     if (recordCommandsEnabled)
     {
         if (commandBufferCount < COMMAND_BUFFER_CAPACITY)
@@ -495,7 +495,7 @@ BaseType_t DuploHub::sendCommand(const HubCommand &cmd, TickType_t timeout)
         }
     }
 
-    // Send command to queue
+    // Actual command execution is deferred to the BLE worker task.
     return xQueueSend(commandQueue, &cmd, timeout);
 }
 
@@ -1119,7 +1119,7 @@ void DuploHub::bleTaskFunction()
             lastConnectionCheck = currentTime;
         }
 
-        // Process command queue more frequently for responsiveness
+        // Command handling runs more often than reconnect logic to keep UI latency low.
         processCommandQueue();
 
         // Small delay to prevent task from hogging CPU
@@ -1135,7 +1135,11 @@ void DuploHub::updateBLE()
     static bool wasEverConnected = false; // Track if we ever had a connection (BLE task context)
     static bool lastConnected = false;    // Track last connection state for callback
     static unsigned long lastConnectAttemptLog = 0;
+    static unsigned long lastScanStartMs = 0;
+    static bool scanAttemptActive = false;
     const unsigned long CONNECT_ATTEMPT_LOG_INTERVAL_MS = 10000;
+    const uint32_t RECONNECT_SCAN_DURATION_S = 2;
+    const unsigned long SCAN_RETRY_INTERVAL_MS = (RECONNECT_SCAN_DURATION_S * 1000UL) + 250UL;
 
     // Get current BLE states from Lpf2Hub
     bool hubConnected = hub.isConnected();
@@ -1145,7 +1149,7 @@ void DuploHub::updateBLE()
     // Update thread-safe state variables
     updateConnectionState(hubConnected, hubConnecting);
 
-    // BLE Connection Management
+    // Discovery is throttled so scans are not restarted on every BLE loop iteration.
     if (hubDisconnected)
     {
         const unsigned long now = millis();
@@ -1161,20 +1165,29 @@ void DuploHub::updateBLE()
             }
             lastConnectAttemptLog = now;
         }
-        if (hubMACAddress != "")
+
+        if (!scanAttemptActive || (now - lastScanStartMs) >= SCAN_RETRY_INTERVAL_MS)
         {
-            hub.init(hubMACAddress);
-            DEBUG_LOG("BLE Task: Using preferred hub address: %s", hubMACAddress.c_str());
-        }
-        else
-        {
-            hub.init();
+            if (hubMACAddress != "")
+            {
+                hub.init(hubMACAddress, RECONNECT_SCAN_DURATION_S);
+                DEBUG_LOG("BLE Task: Using preferred hub address: %s (scan=%lus)", hubMACAddress.c_str(), RECONNECT_SCAN_DURATION_S);
+            }
+            else
+            {
+                hub.init(RECONNECT_SCAN_DURATION_S);
+                DEBUG_LOG("BLE Task: Starting discovery scan (scan=%lus)", RECONNECT_SCAN_DURATION_S);
+            }
+
+            lastScanStartMs = now;
+            scanAttemptActive = true;
         }
     }
 
-    // Handle connection process
+    // Once Legoino reports a pending connection, try to complete it immediately.
     if (hubConnecting)
     {
+        scanAttemptActive = false;
         hub.connectHub();
         if (hub.isConnected())
         {
@@ -1191,9 +1204,10 @@ void DuploHub::updateBLE()
         }
     }
 
-    // Connection state change detection and callback invocation (moved from update())
+    // The application only sees connection edges, not every periodic BLE status poll.
     if (hubConnected && !lastConnected)
     {
+        scanAttemptActive = false;
         DEBUG_LOG("BLE Task: Connection state changed: CONNECTED");
         clearQueues();
         if (onConnectedCallback != nullptr)
@@ -1209,6 +1223,8 @@ void DuploHub::updateBLE()
     }
     else if (!hubConnected && lastConnected)
     {
+        scanAttemptActive = false;
+        lastScanStartMs = 0;
         clearQueues();
         DEBUG_LOG("BLE Task: Connection state changed: DISCONNECTED");
         if (onDisconnectedCallback != nullptr)
@@ -1238,7 +1254,7 @@ void DuploHub::processCommandQueue()
     // Process all available commands (non-blocking)
     while (xQueueReceive(commandQueue, &cmd, 0) == pdTRUE)
     {
-        // Only process commands if connected
+        // Commands are dropped while disconnected because replaying stale writes would be unsafe.
         if (!hub.isConnected())
         {
             DEBUG_LOG("BLE Task: Skipping command - hub not connected");
@@ -1250,49 +1266,49 @@ void DuploHub::processCommandQueue()
         case CommandType::CMD_MOTOR_SPEED:
             DEBUG_LOG("BLE Task: Setting motor speed to %d", cmd.data.motor.speed);
             hub.setBasicMotorSpeed((byte)DuploEnums::DuploTrainHubPort::MOTOR, cmd.data.motor.speed);
-            delay(20); // Reduced delay for faster motor response
+            delay(20); // Short pacing delay so back-to-back protocol writes remain reliable.
             DEBUG_LOG("DuploHub: setBasicMotorSpeed completed at: %lu", millis());
             break;
 
         case CommandType::CMD_STOP_MOTOR:
             DEBUG_LOG("BLE Task: Stopping motor");
             hub.stopBasicMotor((byte)DuploEnums::DuploTrainHubPort::MOTOR);
-            delay(20); // Reduced delay for faster stop
+            delay(20); // Short pacing delay so back-to-back protocol writes remain reliable.
             DEBUG_LOG("DuploHub: stopBasicMotor completed at: %lu", millis());
             break;
 
         case CommandType::CMD_SET_LED_COLOR:
             DEBUG_LOG("BLE Task: Setting LED color to %d", cmd.data.led.color);
             hub.setLedColor((Color)cmd.data.led.color);
-            delay(200); // Ensure LED color command is processed
+            delay(200); // Property updates need a longer settle time than motor writes.
             DEBUG_LOG("DuploHub: setLEDColor completed at: %lu", millis());
             break;
 
         case CommandType::CMD_SET_HUB_NAME:
             DEBUG_LOG("BLE Task: Setting hub name to %s", cmd.data.hubName.name);
             hub.setHubName(cmd.data.hubName.name);
-            delay(200); // Ensure hub name command is processed
+            delay(200); // Property updates need a longer settle time than motor writes.
             DEBUG_LOG("DuploHub: setHubName completed at: %lu", millis());
             break;
 
         case CommandType::CMD_PLAY_SOUND:
             DEBUG_LOG("BLE Task: Playing sound with ID %d", cmd.data.sound.soundId);
             hub.playSound((byte)cmd.data.sound.soundId);
-            delay(200); // Ensure sound command is processed
+            delay(200); // Property updates need a longer settle time than motor writes.
             DEBUG_LOG("DuploHub: playSound completed at: %lu", millis());
             break;
 
         case CommandType::CMD_ACTIVATE_RGB_LIGHT:
             DEBUG_LOG("BLE Task: Activating RGB light");
             hub.activateRgbLight();
-            delay(200); // Ensure RGB light command is processed
+            delay(200); // Activation commands are serialized to avoid missed port setup.
             DEBUG_LOG("DuploHub: activateRgbLight completed");
             break;
 
         case CommandType::CMD_ACTIVATE_BASE_SPEAKER:
             DEBUG_LOG("BLE Task: Activating base speaker");
             hub.activateBaseSpeaker();
-            delay(200); // Ensure base speaker command is processed
+            delay(200); // Activation commands are serialized to avoid missed port setup.
             DEBUG_LOG("DuploHub: activateBaseSpeaker completed");
             break;
 
@@ -1398,7 +1414,7 @@ void DuploHub::clearQueues()
         HubCommand cmd;
         while (xQueueReceive(commandQueue, &cmd, 0) == pdTRUE)
         {
-            // Discard all commands
+            // Drop stale commands when the hub state changes.
         }
     }
     if (responseQueue != nullptr)
@@ -1406,7 +1422,7 @@ void DuploHub::clearQueues()
         HubResponse response;
         while (xQueueReceive(responseQueue, &response, 0) == pdTRUE)
         {
-            // Discard all responses
+            // Drop stale sensor notifications from a previous connection state.
         }
     }
 }

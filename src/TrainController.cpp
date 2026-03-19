@@ -116,13 +116,16 @@ DuploHub duploHub;
 unsigned long lastUserActionTime = 0;
 #define maxIdleTime 300000 // 300 seconds until going to sleep
 
+// Application-visible sensor and controller state mirrored from callbacks and UI actions.
 static int detectedSpeed = 0;
 static float detectedVoltage = 0.0f;
 static int detectedColor = 0;
 static bool emergencyStop = false;
 
+// High-level operating modes used by the main loop and status LED logic.
 static bool recording = false;
 static bool replay = false; // true when a sequence is being replayed
+static bool hubReady = false;
 
 ADCButtons guiButtons = ADCButtons(ADC_PIN);
 
@@ -171,19 +174,52 @@ static bool shouldShowReadyHeartbeat();
  */
 static void updateReadyHeartbeat();
 
+/**
+ * @brief Advance the non-blocking post-connect hub initialization.
+ */
+static void updateHubInitialization();
+
 static bool wakeBlinkActive = false;
 static unsigned long wakeBlinkEndMs = 0;
 
+// Startup and idle LED state bookkeeping.
 static bool uploadModeCheckActive = false;
 static unsigned long uploadModeCheckStartMs = 0;
 static unsigned long encoderBtnHoldStartMs = 0;
 static bool readyHeartbeatActive = false;
 static unsigned long lastReadyHeartbeatMs = 0;
 
+/**
+ * @brief Steps of the deferred post-connect initialization sequence.
+ *
+ * The BLE callback only arms this state machine. The main loop then walks the hub through
+ * device activation and callback registration without blocking BLE housekeeping.
+ */
+enum class HubInitializationStep
+{
+    Idle,
+    RegisterCallbacks,
+    ActivateRgbLight,
+    ActivateBaseSpeaker,
+    ActivateColorSensor,
+    ActivateSpeedSensor,
+    ActivateVoltageSensor,
+    SetHubName,
+    WaitForReady
+};
+
+// Runtime state for the non-blocking hub initialization state machine.
+static bool hubInitializationActive = false;
+static HubInitializationStep hubInitializationStep = HubInitializationStep::Idle;
+static unsigned long hubInitializationStepStartedMs = 0;
+
 #define READY_HEARTBEAT_INTERVAL_MS 8000UL
 #define READY_HEARTBEAT_ON_MS 120
 #define READY_HEARTBEAT_OFF_MS 180
 #define READY_HEARTBEAT_BLINKS 2
+
+#define HUB_INIT_STEP_INTERVAL_MS 80UL
+#define HUB_INIT_READY_SETTLE_MS 1200UL
 
 // Button numbers for GUI buttons
 enum GUIButtons
@@ -231,7 +267,7 @@ void handleButtons(int btn_no, bool pressed)
         DuploEnums::DuploSound::STEAM};
     static int sound = 0; // Sound index for sound playbook
 
-    if (pressed == false || !duploHub.isConnected())
+    if (pressed == false || !duploHub.isConnected() || !hubReady)
         return;
 
     lastUserActionTime = millis();
@@ -371,6 +407,11 @@ static void handleEncoder(long speed)
     const long requestedSpeed = -speed;
 
     DEBUG_LOG("TrainController: Set motor speed to %d", requestedSpeed);
+
+    if (!hubReady)
+    {
+        return;
+    }
 
     if (emergencyStop)
     {
@@ -536,7 +577,7 @@ static void detectedSpeedCb(int speed)
     detectedSpeed = speed;
 }
 
-// Callback function when hub connects
+// Last known BLE address of the currently connected train hub.
 String duploHubAddress = "";
 
 /**
@@ -547,47 +588,16 @@ String duploHubAddress = "";
  */
 static void onHubConnected()
 {
-    DEBUG_LOG("TrainController: Hub instance connected, starting initialization...");
-    statusLed.setColor(CRGB::Blue);           // Set color to blue
-    statusLed.setBlinking(true, 200, 300, 3); // Blink blue 3x
-    delay(1800);                              // Wait for 3 blinks (3 * (200+300) ms)
-    statusLed.setOff();                       // Turn LED off after blinking
-
-    // reset user activity timer to start value
+    DEBUG_LOG("TrainController: Hub instance connected, scheduling initialization...");
     lastUserActionTime = millis();
+    hubReady = false;
+    hubInitializationActive = true;
+    hubInitializationStep = HubInitializationStep::RegisterCallbacks;
+    hubInitializationStepStartedMs = 0;
+    readyHeartbeatActive = false;
 
-#ifdef DEBUG
-    duploHub.listDevicePorts(); // List connected devices on the hub
-    delay(1000);
-#endif
-
-    duploHub.activateRgbLight();
-    delay(200);
-    duploHub.activateBaseSpeaker();
-    delay(200);
-    duploHub.activateColorSensor();
-    delay(200);
-    duploHub.activateSpeedSensor();
-    delay(200);
-    duploHub.activateVoltageSensor();
-    delay(200);
-    DEBUG_LOG("DuploHub: All ports activated");
-
-    duploHub.setDetectedColorCallback(detectedColorCb);
-    delay(200);
-    duploHub.setDetectedSpeedCallback(detectedSpeedCb);
-    delay(200);
-    duploHub.setDetectedVoltageCallback(detectedVoltageCb);
-    delay(200);
-    DEBUG_LOG("DuploHub: All callbacks registered");
-
-    duploHub.setHubName("DuploTrain_1");
-    delay(200);
-
-    duploHubAddress = String(duploHub.getHubAddress().c_str());
-
-    DEBUG_LOG("TrainController: Connected to hub: %s", duploHub.getHubName().c_str());
-    DEBUG_LOG("TrainController: Hub address: %s", duploHubAddress.c_str());
+    statusLed.setColor(CRGB::Blue);
+    statusLed.setBlinking(true, 150, 250);
 }
 
 // Callback function when hub disconnects
@@ -597,10 +607,109 @@ static void onHubConnected()
 static void onHubDisconnected()
 {
     DEBUG_LOG("TrainController: Hub disconnected - stopping all operations");
-    statusLed.setColor(CRGB::White);          // Set color to white
-    statusLed.setBlinking(true, 200, 300, 3); // Blink white 3x
-    delay(1800);                              // Wait for 3 blinks (3 * (200+300) ms)
-    statusLed.setOff();                       // Turn LED off after blinking
+    hubReady = false;
+    hubInitializationActive = false;
+    hubInitializationStep = HubInitializationStep::Idle;
+    hubInitializationStepStartedMs = 0;
+    readyHeartbeatActive = false;
+    statusLed.setColor(CRGB::White);
+    statusLed.setBlinking(true, 200, 300, 3);
+}
+
+/**
+ * @brief Progress hub setup without blocking the BLE worker task.
+ */
+static void updateHubInitialization()
+{
+    if (!hubInitializationActive)
+    {
+        return;
+    }
+
+    if (!duploHub.isConnected())
+    {
+        hubReady = false;
+        hubInitializationActive = false;
+        hubInitializationStep = HubInitializationStep::Idle;
+        hubInitializationStepStartedMs = 0;
+        return;
+    }
+
+    const unsigned long now = millis();
+    const unsigned long requiredDelay = (hubInitializationStep == HubInitializationStep::WaitForReady)
+                                            ? HUB_INIT_READY_SETTLE_MS
+                                            : HUB_INIT_STEP_INTERVAL_MS;
+
+    if (hubInitializationStepStartedMs != 0 && (now - hubInitializationStepStartedMs) < requiredDelay)
+    {
+        return;
+    }
+
+    // Advance exactly one initialization stage per loop iteration once its pacing delay elapsed.
+    switch (hubInitializationStep)
+    {
+    case HubInitializationStep::RegisterCallbacks:
+#ifdef DEBUG
+        duploHub.listDevicePorts();
+#endif
+        duploHub.setDetectedColorCallback(detectedColorCb);
+        duploHub.setDetectedSpeedCallback(detectedSpeedCb);
+        duploHub.setDetectedVoltageCallback(detectedVoltageCb);
+        DEBUG_LOG("TrainController: Hub callbacks registered");
+        hubInitializationStep = HubInitializationStep::ActivateRgbLight;
+        break;
+
+    case HubInitializationStep::ActivateRgbLight:
+        duploHub.activateRgbLight();
+        hubInitializationStep = HubInitializationStep::ActivateBaseSpeaker;
+        break;
+
+    case HubInitializationStep::ActivateBaseSpeaker:
+        duploHub.activateBaseSpeaker();
+        hubInitializationStep = HubInitializationStep::ActivateColorSensor;
+        break;
+
+    case HubInitializationStep::ActivateColorSensor:
+        duploHub.activateColorSensor();
+        hubInitializationStep = HubInitializationStep::ActivateSpeedSensor;
+        break;
+
+    case HubInitializationStep::ActivateSpeedSensor:
+        duploHub.activateSpeedSensor();
+        hubInitializationStep = HubInitializationStep::ActivateVoltageSensor;
+        break;
+
+    case HubInitializationStep::ActivateVoltageSensor:
+        duploHub.activateVoltageSensor();
+        hubInitializationStep = HubInitializationStep::SetHubName;
+        break;
+
+    case HubInitializationStep::SetHubName:
+        duploHub.setHubName("DuploTrain_1");
+        hubInitializationStep = HubInitializationStep::WaitForReady;
+        break;
+
+    case HubInitializationStep::WaitForReady:
+        duploHubAddress = String(duploHub.getHubAddress().c_str());
+        DEBUG_LOG("TrainController: Connected to hub: %s", duploHub.getHubName().c_str());
+        DEBUG_LOG("TrainController: Hub address: %s", duploHubAddress.c_str());
+        DEBUG_LOG("TrainController: Hub initialization complete - commands are ready");
+        hubReady = true;
+        hubInitializationActive = false;
+        hubInitializationStep = HubInitializationStep::Idle;
+        readyHeartbeatActive = true;
+        lastReadyHeartbeatMs = now;
+        statusLed.setColor(CRGB::Green);
+        statusLed.setBlinking(true, 120, 180, 3);
+        break;
+
+    case HubInitializationStep::Idle:
+    default:
+        hubInitializationActive = false;
+        break;
+    }
+
+    hubInitializationStepStartedMs = now;
 }
 /**
  * @brief Execute the next recorded command when its playback timestamp arrives.
@@ -706,8 +815,7 @@ void setup()
 
     const esp_sleep_wakeup_cause_t wakeCause = esp_sleep_get_wakeup_cause();
 
-    // Update mode is entered only when encoder button is held LOW continuously for >= 2 seconds
-    // shortly after boot/wakeup. Short presses will not trigger the 10-second upload window.
+    // Upload mode is intentionally hard to trigger so normal wake presses do not stall boot.
     uploadModeCheckActive = true;
     uploadModeCheckStartMs = millis();
     encoderBtnHoldStartMs = 0;
@@ -789,6 +897,7 @@ static bool shouldShowReadyHeartbeat()
 
     return !wakeBlinkActive &&
            !uploadModeCheckActive &&
+           hubReady &&
            !recording &&
            !replay &&
            !emergencyStop &&
@@ -977,6 +1086,7 @@ void checkStatus(DuploHub &duploHub)
         float cpuTemp = getCPUTemperature();
         DEBUG_LOG("CPU Temperature: %.2f °C", cpuTemp);
 
+        // Low-voltage indication is suppressed while record/replay owns the status LED.
         if (detectedVoltage < LOW_VOLTAGE_THRESHOLD && !(recording || replay))
         {
             DEBUG_LOG("TrainController: Low voltage detected: %.2f V", detectedVoltage);
@@ -1009,12 +1119,11 @@ void esp_goto_sleep()
 
     if (encoderButtonIsRtcWakeCapable())
     {
-        // Enter deep sleep (wake via EXT0)
+        // Preferred path: deepest power saving with RTC-backed wake on the encoder button.
         esp_deep_sleep_start();
     }
 
-    // Fallback: if ENCODER_BTN isn't RTC IO, EXT0 can't wake from deep sleep.
-    // Use light sleep with GPIO wake so the button still wakes the controller.
+    // Fallback: GPIO wake keeps the controller usable on boards without RTC IO on this pin.
     DEBUG_LOG("TrainController: Falling back to light sleep (GPIO wake)");
     configureEncoderButtonLightSleepWakeup();
     esp_light_sleep_start();
@@ -1046,7 +1155,7 @@ void loop()
         statusLed.setOff();
     }
 
-    // Enter upload mode only after continuous >=2s button hold during startup phase.
+    // Gate upload mode behind a continuous hold to avoid accidental entry during wakeup handling.
     if (uploadModeCheckActive)
     {
         const unsigned long now = millis();
@@ -1108,6 +1217,8 @@ void loop()
     }
 
     guiButtons.updateButtons();
+
+    updateHubInitialization();
 
     if (duploHub.isConnected())
     {

@@ -1,7 +1,19 @@
+/**
+ * @file StatusLED.h
+ * @brief Minimal wrapper around FastLED for the controller's single RGB status LED.
+ *
+ * Encapsulates steady colors and finite or continuous blink patterns so the rest of the
+ * firmware can express status transitions without interacting with FastLED timing details.
+ *
+ * @author Ralf Zühlsdorff
+ * @date 2025
+ *
+ * @copyright
+ * MIT License
+ */
+
 #include <Arduino.h>
 #include <FastLED.h>
-
-
 
 /**
  * @class StatusLED
@@ -53,17 +65,17 @@ public:
     void setOff();
 
 private:
-    int _pin;
-    CRGB _leds[1]; // FastLED array with one LED
-    CRGB _color;   // Current color to display
-    int _pattern;
-    bool _blinking;
-    int _interval;
-    int _ontime;
-    int _blinkTimes;      // Number of times to blink (-1 = infinite)
-    int _currentBlinks;   // Counter for current blink cycles
-    bool _lastWasOn;      // Track previous LED state for blink counting
-    unsigned long _lastUpdate;
-    bool _initialized;
-    bool _dirty;
+    int _pin;                  ///< GPIO used by the NeoPixel-compatible status LED.
+    CRGB _leds[1];             ///< Backing FastLED buffer for the single on-board LED.
+    CRGB _color;               ///< Target color for steady display or the active blink phase.
+    int _pattern;              ///< Reserved for future pattern expansion; currently unused.
+    bool _blinking;            ///< `true` while blink timing is active.
+    int _interval;             ///< Off-time in milliseconds between blink pulses.
+    int _ontime;               ///< On-time in milliseconds for each blink pulse.
+    int _blinkTimes;           ///< Number of requested blinks, or `-1` for continuous blinking.
+    int _currentBlinks;        ///< Number of completed on-phases in the current blink sequence.
+    bool _lastWasOn;           ///< Tracks the previous phase to count finite blinks correctly.
+    unsigned long _lastUpdate; ///< Timestamp used as the blink cycle origin.
+    bool _initialized;         ///< Indicates whether FastLED has already been configured.
+    bool _dirty;               ///< Prevents redundant hardware refreshes when visible state is unchanged.
 };

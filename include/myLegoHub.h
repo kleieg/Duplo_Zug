@@ -20,7 +20,9 @@
 
 namespace DuploEnums
 {
-    // Device types for Duplo Train Hub
+    /**
+     * @brief DUPLO-specific Powered Up device identifiers reported by the hub.
+     */
     enum struct DuploTrainDeviceType
     {
         DUPLO_TRAIN_BASE_MOTOR = 41,
@@ -31,9 +33,11 @@ namespace DuploEnums
         LIGHT = 8
     };
 
-    // Port enumeration for Duplo Train Hub
-    // These ports correspond to the physical ports on the DUPLO Train Hub
-    // and are used for device activation and communication.
+    /**
+     * @brief Logical ports used by the DUPLO train hub firmware.
+     *
+     * These values match the port numbers expected by the LEGO Powered Up protocol.
+     */
     enum struct DuploTrainHubPort
     {
         MOTOR = 0x00,
@@ -44,9 +48,9 @@ namespace DuploEnums
         VOLTAGE = 0x14
     };
 
-    
-
-    // Enum for available Duplo sounds
+    /**
+     * @brief Sound identifiers understood by the DUPLO train hub.
+     */
     enum DuploSound
     {
         BRAKE = 3,
@@ -56,7 +60,9 @@ namespace DuploEnums
         STEAM = 10
     };
 
-    // Enum for available Duplo colors
+    /**
+     * @brief Color IDs supported by the hub LED and color sensor parser.
+     */
     enum DuploColor
     {
         BLACK = 0,
@@ -72,59 +78,71 @@ namespace DuploEnums
         WHITE = 10
     };
 
-    
 }
-
-// Callback function types
 /**
  * @brief Callback signature for hub connection-state changes.
  */
 typedef void (*ConnectionCallback)();
 
-// Add a typedef for the detected color callback
 /**
  * @brief Callback signature for stable color detections.
  * @param color Parsed DUPLO color value.
  */
 typedef void (*DetectedColorCallback)(DuploEnums::DuploColor);
 
-// Add a typedef for the speed callback
 /**
  * @brief Callback signature for speed sensor updates.
  * @param detectedSpeed Normalized train speed.
  */
 typedef void (*DetectedSpeedCallback)(int detectedSpeed);
 
-// Add a typedef for the voltage callback
 /**
  * @brief Callback signature for voltage sensor updates.
  * @param detectedVoltage Measured hub voltage in volts.
  */
 typedef void (*DetectedVoltageCallback)(float detectedVoltage);
 
-
-
-
-// Class myLegoHub adds extensions and small modifucations to the Lpf2Hub class
-
-class myLegoHub : public Lpf2Hub {
+/**
+ * @class myLegoHub
+ * @brief DUPLO-focused facade over Legoino's `Lpf2Hub`.
+ *
+ * The class exposes only the higher-level helpers this project needs, keeping DUPLO-specific
+ * message layouts in a single place instead of scattering them through `DuploHub`.
+ */
+class myLegoHub : public Lpf2Hub
+{
 public:
     /** @brief Enable the DUPLO speaker port. */
     void activateBaseSpeaker();
 
-    /** @brief Start playback of a DUPLO sound effect. */
+    /**
+     * @brief Start playback of a DUPLO sound effect.
+     * @param sound DUPLO sound identifier to send to the hub.
+     */
     void playSound(byte sound);
 
     /** @brief Enable the on-hub RGB LED port. */
     void activateRgbLight();
 
-    /** @brief Apply a color to the on-hub RGB LED. */
+    /**
+     * @brief Apply a color to the on-hub RGB LED.
+     * @param color FastLED/Legoino color identifier accepted by the hub.
+     */
     void setLedColor(Color color);
 
-    /** @brief Map the raw speedometer count into a normalized range. */
+    /**
+     * @brief Map the raw speedometer count into a normalized range.
+     * @param rawSpeed Raw speed reading as delivered by Legoino.
+     * @param maxRawSpeed Positive full-scale reference value for normalization.
+     * @return Normalized speed in the range `-100..100`.
+     */
     int MapSpeedometer(int rawSpeed, int maxRawSpeed = 255);
 
-    /** @brief Convert raw voltage sensor bytes into volts. */
+    /**
+     * @brief Convert raw voltage sensor bytes into volts.
+     * @param pData Raw payload buffer received from the hub.
+     * @return Measured voltage in volts.
+     */
     float parseVoltage(uint8_t *pData);
 };
 

@@ -16,7 +16,6 @@
 #ifndef DUPLO_HUB_H
 #define DUPLO_HUB_H
 
-
 #include <array>
 #include "myLegoHub.h"
 #include "freertos/FreeRTOS.h"
@@ -24,7 +23,9 @@
 #include "freertos/semphr.h"
 #include "freertos/queue.h"
 
-// Command types for thread-safe communication
+/**
+ * @brief Commands exchanged between the application core and the BLE worker task.
+ */
 enum CommandType
 {
     CMD_ACTIVATE_RGB_LIGHT,
@@ -39,33 +40,37 @@ enum CommandType
     CMD_ACTIVATE_VOLTAGE_SENSOR
 };
 
-// Command structure for queue communication
+/**
+ * @brief POD payload stored in `commandQueue` for BLE task execution.
+ */
 typedef struct
 {
-    CommandType type;
-    long timestamp; // Timestamp for command execution order
+    CommandType type; ///< Kind of command the BLE task shall execute.
+    long timestamp;   ///< Creation timestamp used for record/replay ordering.
     union
     {
         struct
         {
-            int speed;
+            int speed; ///< Requested motor speed in the range `-100..100`.
         } motor;
         struct
         {
-            DuploEnums::DuploColor color;
+            DuploEnums::DuploColor color; ///< LED color to forward to the hub.
         } led;
         struct
         {
-            char name[32]; // Fixed size for thread safety
+            char name[32]; ///< Fixed-size hub name buffer for queue-safe transfer.
         } hubName;
         struct
         {
-            int soundId;
+            int soundId; ///< DUPLO sound identifier to play.
         } sound;
     } data;
 } HubCommand;
 
-// Enum for response types
+/**
+ * @brief Event types sent from the BLE worker task back to the application core.
+ */
 enum ResponseType
 {
     Detected_Color,
@@ -73,74 +78,77 @@ enum ResponseType
     Detected_Voltage
 };
 
-// Response structure for queue communication
+/**
+ * @brief POD payload stored in `responseQueue` for sensor and status events.
+ */
 typedef struct
 {
-    ResponseType type;
+    ResponseType type; ///< Event category carried by this queue item.
     union
     {
         struct
         {
-            DuploEnums::DuploColor detectedColor;
+            DuploEnums::DuploColor detectedColor; ///< Debounced color sensor result.
         } colorResponse;
         struct
         {
-            int detectedSpeed;
+            int detectedSpeed; ///< Normalized speed sensor reading.
         } speedResponse;
         struct
         {
-            float detectedVoltage;
+            float detectedVoltage; ///< Measured train battery voltage.
         } voltageResponse;
-        // Add other response types here as needed
     } data;
 } HubResponse;
 
-// Threshold definition for callback execution
+/** @brief Minimum voltage delta required before reporting a new voltage event. */
 #define VOLTAGE_THRESHOLD 0.1f
+/** @brief Minimum speed delta required before reporting a new speed event. */
 #define SPEED_THRESHOLD 5
 
-// DuploHub class definition
-// This class encapsulates the functionality of the LEGO DUPLO Train Hub
-// It provides methods for connecting to the hub, controlling motors, lights, and sensors,
-// and handling BLE communication in a thread-safe manner.
-// The class uses FreeRTOS for task management and synchronization.
-
+/**
+ * @class DuploHub
+ * @brief Thread-safe high-level DUPLO train controller for the project firmware.
+ *
+ * `DuploHub` isolates BLE timing, queue handling, connection lifecycle and sensor routing from
+ * the Arduino main loop. The main application pushes commands into the hub and consumes debounced
+ * sensor events without talking to Legoino directly.
+ */
 class DuploHub
 {
 private:
-    myLegoHub hub; ///< Underlying hardware interface
-    byte motorPort;
-    std::string hubMACAddress;
-    bool wasConnected;
-    static DuploHub *instance;
-    volatile bool connectionState;
-    volatile bool connectingState;
-    SemaphoreHandle_t connectionMutex;
-    QueueHandle_t commandQueue;
-    QueueHandle_t responseQueue;
-    TaskHandle_t bleTaskHandle;
-    
+    myLegoHub hub;                     ///< Underlying DUPLO/Legoino adapter instance.
+    byte motorPort;                    ///< Configured motor port used for drive commands.
+    std::string hubMACAddress;         ///< Optional preferred hub address for reconnects.
+    bool wasConnected;                 ///< Historical marker for connection-dependent behavior.
+    static DuploHub *instance;         ///< Singleton-style back-reference for static callbacks.
+    volatile bool connectionState;     ///< Cached connection state shared with the main loop.
+    volatile bool connectingState;     ///< Cached scan/connect-in-progress state.
+    SemaphoreHandle_t connectionMutex; ///< Protects access to the cached connection flags.
+    QueueHandle_t commandQueue;        ///< Main-loop to BLE-task command queue.
+    QueueHandle_t responseQueue;       ///< BLE-task to main-loop event queue.
+    TaskHandle_t bleTaskHandle;        ///< FreeRTOS handle of the BLE worker task.
+
     // Fixed command buffer for record / replay processing.
     // Recording stops automatically when this capacity is reached.
     static constexpr size_t COMMAND_BUFFER_CAPACITY = 32;
     std::array<HubCommand, COMMAND_BUFFER_CAPACITY> commandBuffer{};
-    size_t commandBufferCount = 0;
-    
-    // Replay state management
-    bool replaying = false;
-    size_t replayIndex = 0;
-    int64_t replayStartTime = 0;
-    int64_t originalStartTime = 0;
-    int64_t sequenceDuration = 0;  // Total duration of command sequence
-    int replayCycle = 0;           // Current replay cycle number
-    bool recordCommandsEnabled = false;
+    size_t commandBufferCount = 0; ///< Number of valid entries currently stored for replay.
 
-    // Callback functions
-    ConnectionCallback onConnectedCallback;
-    ConnectionCallback onDisconnectedCallback;
-    DetectedColorCallback detectedColorCallback;
-    DetectedSpeedCallback detectedSpeedCallback;
-    DetectedVoltageCallback detectedVoltageCallback;
+    // Replay state management
+    bool replaying = false;             ///< `true` while recorded commands are being replayed.
+    size_t replayIndex = 0;             ///< Index of the next replay command.
+    int64_t replayStartTime = 0;        ///< Timestamp when the current replay run started.
+    int64_t originalStartTime = 0;      ///< Timestamp of the first recorded command before normalization.
+    int64_t sequenceDuration = 0;       ///< Total replay sequence duration after normalization.
+    int replayCycle = 0;                ///< Reserved replay cycle counter for future looped replay modes.
+    bool recordCommandsEnabled = false; ///< `true` while outgoing commands are captured for replay.
+
+    ConnectionCallback onConnectedCallback;          ///< Application hook for BLE connect events.
+    ConnectionCallback onDisconnectedCallback;       ///< Application hook for BLE disconnect events.
+    DetectedColorCallback detectedColorCallback;     ///< Application hook for debounced color updates.
+    DetectedSpeedCallback detectedSpeedCallback;     ///< Application hook for speed updates.
+    DetectedVoltageCallback detectedVoltageCallback; ///< Application hook for voltage updates.
 
     // Internal task management
     /**
@@ -170,7 +178,7 @@ private:
      * @brief Flush pending commands and responses.
      */
     void clearQueues();
-    
+
     // Command queue wrapper for recording functionality
     /**
      * @brief Enqueue a command, optionally recording it for replay.
@@ -179,7 +187,7 @@ private:
      * @param timeout Maximum time the caller may block waiting for space in the queue.
      * @return `pdTRUE` on success, or `errQUEUE_FULL` if the queue is saturated.
      */
-    BaseType_t sendCommand(const HubCommand& cmd, TickType_t timeout);
+    BaseType_t sendCommand(const HubCommand &cmd, TickType_t timeout);
 
     /**
      * @brief Lazily create the timer that debounces color sensor readings.
@@ -187,7 +195,7 @@ private:
      * @return True when the timer exists and is ready to start.
      */
     static bool ensureColorTimerInitialized();
-    
+
     /**
      * @brief FreeRTOS entry point for the BLE management task.
      */
@@ -301,7 +309,6 @@ public:
      */
     bool isBLETaskRunning();
 
-
     /**
      * @brief Check if hub is connected (thread-safe).
      * @return true if connected.
@@ -319,7 +326,6 @@ public:
      * @return true if disconnected.
      */
     bool isDisconnected();
-
 
     /**
      * @brief Set the hub name.
@@ -357,12 +363,12 @@ public:
     byte getMotorPort();
 
     /**
-        * @brief Enable or disable command recording for replay functionality.
-        *
-        * Recording uses a fixed-size buffer with capacity `COMMAND_BUFFER_CAPACITY`.
-        * When full, recording is disabled automatically.
-        *
-        * @param enable True to start recording commands, false to stop recording.
+     * @brief Enable or disable command recording for replay functionality.
+     *
+     * Recording uses a fixed-size buffer with capacity `COMMAND_BUFFER_CAPACITY`.
+     * When full, recording is disabled automatically.
+     *
+     * @param enable True to start recording commands, false to stop recording.
      */
     void recordCommands(bool enable);
 
@@ -372,13 +378,13 @@ public:
      * to maintain relative timing differences
      */
     void replayCommands();
-    
+
     /**
      * @brief Get the next command to replay if it's time to execute it
      * @return Pointer to the next command if ready, nullptr if no command ready or replay finished
      */
-    const HubCommand* getNextReplayCommand();
-    
+    const HubCommand *getNextReplayCommand();
+
     /**
      * @brief Check if replay is currently active
      * @return true if replaying, false otherwise
@@ -390,7 +396,7 @@ public:
      * @return true if recording is enabled, false otherwise.
      */
     bool isRecordingCommandsEnabled() const;
-    
+
     /**
      * @brief Stop the current replay operation
      */
