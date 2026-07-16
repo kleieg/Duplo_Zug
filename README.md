@@ -30,7 +30,8 @@ The short feature demonstration is available here:
 [![DuploTrain demo preview](images/DuploTrain.jpeg)](images/Demo-Train-Controller.mov)
 
 
-- [Duplo Train Controller demo video available on youtube](images/Demo-Train-Controller.mov)
+- [Duplo Train Controller demo video available on youtube](https://www.youtube.com/shorts/3SnFerBsN44)
+  
 ### Hardware Gallery
 
 #### Controller and PCB 3D View
