@@ -1,33 +1,33 @@
-# Button Export Workflow (Mehrfarbig)
+# Button Export Workflow (Multicolor)
 
-Diese Anleitung beschreibt den stabilen Workflow für mehrfarbige Knöpfe (Basis + Symbol) mit OpenSCAD und Orca/Anycubic Next Slicer.
+This guide describes the stable workflow for multicolor buttons (base + symbol) with OpenSCAD and Orca/Anycubic Next Slicer.
 
-## Voraussetzungen
+## Requirements
 
-- Datei: `Controller-V1.5.scad`
-- Split-Funktion: `SplitColorButton(...)`
+- File: `Controller-V1.5.scad`
+- Split function: `SplitColorButton(...)`
 - Parameter:
   - `symbol_z = 9.05` (Default)
   - `buttonExportMode = both|base|symbol`
   - `buttonExportTarget = all|stop|water|light|music`
   - `renderController = true|false`
 
-## Export aus OpenSCAD
+## Export From OpenSCAD
 
-1. In `Controller-V1.5.scad` setzen:
+1. In `Controller-V1.5.scad` set:
    - `renderController = false`
-   - `buttonExportTarget = stop` (oder `water`, `light`, `music`)
-2. Basis exportieren:
+   - `buttonExportTarget = stop` (or `water`, `light`, `music`)
+2. Export base:
    - `buttonExportMode = "base"`
    - `F6` (Render)
-   - Export als STL, z. B. `Knopf_Stop_base.stl`
-3. Symbol exportieren:
+   - Export as STL, e.g. `Knopf_Stop_base.stl`
+3. Export symbol:
    - `buttonExportMode = "symbol"`
    - `F6` (Render)
-   - Export als STL, z. B. `Knopf_Stop_symbol.stl`
-4. Für alle Buttons wiederholen.
+   - Export as STL, e.g. `Knopf_Stop_symbol.stl`
+4. Repeat for all buttons.
 
-## Empfohlene Dateinamen
+## Recommended File Names
 
 - `Knopf_Stop_base.stl` + `Knopf_Stop_symbol.stl`
 - `Knopf_Wasser_base.stl` + `Knopf_Wasser_symbol.stl`
@@ -36,14 +36,14 @@ Diese Anleitung beschreibt den stabilen Workflow für mehrfarbige Knöpfe (Basis
 
 ## Import in Orca / Anycubic Next Slicer
 
-1. Zuerst `*_base.stl` laden.
-2. Danach `*_symbol.stl` als Teil (Part) zum gleichen Objekt hinzufügen:
-   - Nicht als neues, separates Objekt laden.
-3. Jedem Part Filament/Farbe zuweisen.
-4. Projekt als 3MF speichern.
+1. Load `*_base.stl` first.
+2. Then add `*_symbol.stl` as a part to the same object:
+   - Do not load it as a new, separate object.
+3. Assign filament/color to each part.
+4. Save project as 3MF.
 
-## Wichtige Hinweise
+## Important Notes
 
-- Farben aus OpenSCAD `color(...)` sind primär Vorschau und nicht die druckrelevante Farbzuweisung.
-- Die druckrelevante Zuordnung erfolgt im Slicer über Parts/Volumes und Filament-Slots.
-- Wenn Symbol und Basis beide auf Z=0 landen, wurde das Symbol als neues Objekt statt als Part importiert.
+- Colors from OpenSCAD `color(...)` are primarily for preview and are not the print-relevant color assignment.
+- Print-relevant assignment is done in the slicer via parts/volumes and filament slots.
+- If symbol and base both land at Z=0, the symbol was imported as a new object instead of as a part.

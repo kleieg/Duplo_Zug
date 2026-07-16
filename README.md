@@ -1,88 +1,131 @@
 # DUPLO Train Controller NG
 
-ESP32-S3-basierter Handcontroller fuer LEGO DUPLO Zuege mit BLE-Anbindung, Replay/Record-Funktion, Sensor-Auswertung und stromsparendem Sleep/Wake-Verhalten.
+ESP32-S3-based handheld controller for LEGO DUPLO trains, implementing BLE communication, deterministic command handling, replay/record, sensor routing, and low-power sleep/wake behavior.
 
-## Ueberblick
+LEGO and DUPLO are trademarks and copyrighted properties of the LEGO Group. This project is an independent, community-driven development and is not affiliated with, authorized, endorsed, or sponsored by the LEGO Group.
 
-Das Projekt umfasst:
+## Overview
 
-- die Firmware des Handcontrollers
-- die Schaltplan- und PCB-Daten
-- die OpenSCAD- und 3D-Druckdaten fuer das Gehaeuse
+This repository contains the complete implementation package for the controller:
 
-Die Firmware laeuft auf einem ESP32-S3-Board mit RGB-Status-LED, 6 Tastern ueber ADC-Widerstandsleiter und einem Drehencoder als Fahrregler.
+- firmware sources for application logic and BLE runtime
+- schematic/PCB design files and manufacturing outputs
+- OpenSCAD enclosure sources and 3D-print assets
 
-## Aktueller Funktionsstand
+The target hardware is an ESP32-S3 board with one RGB status LED, six front-panel buttons connected through an ADC resistor ladder, and one rotary encoder with push button.
 
-- automatische BLE-Verbindung zum DUPLO-Zug
-- Reconnect nach Zug-Power-Cycle in der Praxis ca. 2 bis 3 Sekunden
-- Befehlsannahme direkt nach Ready-Zustand
-- thread-sichere Trennung von UI-Logik und BLE-Kommunikation
-- Record/Replay von Bedienfolgen mit Zeitstempeln
-- Sensorverarbeitung fuer Farbe, Geschwindigkeit und Spannung
-- Farb-Sensor-Entprellung ueber Stabilitaets-Timer
-- Sleep nach 5 Minuten Inaktivitaet
-- Wake ueber Encoder-Taster, inkl. RTC- und GPIO-Fallback
-- Upload-Fenster nur bei bewusstem Encoder-Hold waehrend des Starts
+At runtime, the firmware separates BLE processing from UI/control logic and uses queue-based cross-task communication. The resulting behavior is:
+
+- non-blocking command flow during connect/reconnect phases
+- explicit distinction between BLE link-up and application-ready state
+- stable reconnect behavior after train power-cycle
+- deterministic replay/record using fixed-size command buffering
+- power management with controlled sleep entry and defined wake path
+
+### Overview Demo Video
+
+The short feature demonstration is available here:
+
+
+[![DuploTrain demo preview](images/DuploTrain.jpeg)](images/Demo-Train-Controller.mov)
+
+
+- [Duplo Train Controller demo video available on youtube](images/Demo-Train-Controller.mov)
+### Hardware Gallery
+
+#### Controller and PCB 3D View
+
+<p align="center">
+	<img src="images/Controller_blue.jpeg" alt="DUPLO Train Controller in blue enclosure" height="320" />
+	<img src="images/ControllerBoard 3d.png" alt="Controller board 3D view" height="320" />
+</p>
+
+#### Schematic
+
+<p align="center">
+	<img src="images/ControllerBoard Schematic.png" alt="Controller schematic" width="70%" />
+</p>
+
+### Manufacturing Note
+
+I have been using PCBWay for PCB manufacturing for many years and have consistently had a great experience with production quality, lead time, shipping reliability, and overall pricing.
+
+For this controller revision, I also used the PCB assembly service. The result was especially positive: when I made a few minor part-selection mistakes in the BOM, PCBWay engineering proactively reached out, clarified the issues, and helped resolve everything quickly before production. For future, more complex designs, especially boards with a higher SMD component density, this assembly workflow is now my preferred path.
+
+## Current Feature Status
+
+Implemented features (high level):
+
+- automatic BLE connection to the DUPLO train
+- reconnect after train power-cycle in about 2 to 3 seconds in practice
+- command acceptance immediately after reaching ready state
+- thread-safe separation of UI logic and BLE communication
+- record/replay of user interactions with timestamps
+- sensor processing for color, speed, and voltage
+- color sensor debouncing via stability timer
+- sleep after 5 minutes of inactivity
+- wake via encoder button, including RTC and GPIO fallback
+- upload window only with intentional encoder hold during startup
 
 ## Status-LED
 
-Die Controller-LED signalisiert den aktuellen Zustand wie folgt:
+The controller LED indicates the current state as follows:
 
-- Gelb blinkend: Controller startet
-- Blau blinkend: BLE-Verbindung steht, Hub-Initialisierung laeuft noch
-- Gruen blinkend: Hub ist betriebsbereit und Befehle koennen ausgefuehrt werden
-- Gruen gelegentliche kurze Pulse: betriebsbereit und idle
-- Violett blinkend: Aufnahme aktiv
-- Gelb blinkend: Replay aktiv
-- Rot dauerhaft: Nothalt aktiv
-- Rot kurze Blinkfolge: Low-Voltage-Warnung des Zuges
-- Weiss blinkend: Hub wurde getrennt
-- 5x Gruen: Wake aus Sleep bestaetigt
-- 2x Rot: Sleep-Eintritt wird angezeigt
+- Yellow blinking: controller is booting
+- Blue blinking: BLE link is up, hub initialization still running
+- Green blinking: hub is operational and commands can be executed
+- Green occasional short pulses: operational and idle
+- Violet blinking: recording active
+- Yellow blinking: replay active
+- Solid red: emergency stop active
+- Red short blink sequence: train low-voltage warning
+- White blinking: hub disconnected
+- 5x green: wake from sleep confirmed
+- 2x red: sleep entry indication
 
-Wichtig: Gruen bedeutet jetzt explizit nicht nur "verbunden", sondern "bereit fuer Befehle".
+Important: Green now explicitly means not just "connected" but "ready for commands".
 
-## Bedienung
+## Controls
 
-- Encoder drehen: Geschwindigkeit rueckwaerts, Stopp, vorwaerts
-- Encoder kurz druecken: Wake aus Sleep
-- Encoder beim Start >= 2 s halten: 10-Sekunden-Upload-Fenster
-- REC: Aufnahme starten/stoppen
-- PLAY: letzte Aufnahme einmal abspielen
-- STOP: Replay bzw. Aufnahme beenden und Nothalt toggeln
-- LIGHT: Zugfarbe durchschalten
-- SOUND: Sounds durchschalten
-- WATER: Wasser-Aktion ausloesen
+- Rotate encoder: set speed reverse, stop, forward
+- Short encoder press: wake from sleep
+- Hold encoder during startup >= 2 s: open 10-second upload window
+- REC: start/stop recording
+- PLAY: play the latest recording once
+- STOP: stop replay/recording and toggle emergency stop
+- LIGHT: cycle train light colors
+- SOUND: cycle sounds
+- WATER: trigger water action
 
-## Farbsteine
+## Color Bricks
 
-- Gelb: Hupe
-- Rot: Zug stoppen
-- Gruen: stoppen und Fahrtrichtung wechseln
-- Weiss: Licht toggeln
-- Blau: Wasser-Aktion, danach Weiterfahrt mit letzter Geschwindigkeit
+The following color bricks of the DUPLO Train are also recognized:
+- Yellow: horn
+- Red: stop train
+- Green: stop and switch driving direction
+- White: toggle light
+- Blue: water action, then continue at previous speed
 
-## Architektur in Kurzform
+## Architecture in Short
 
 - Core 0: BLE-Task (`DuploHub`)
 - Core 1: Arduino-Loop (`TrainController`)
 - Main Loop -> `commandQueue` -> BLE-Task
 - BLE-Task -> `responseQueue` -> Main Loop
 
-Details stehen in [ARCHITECTURE.md](ARCHITECTURE.md).
+Details are documented in [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## Projektstruktur
+## Project Structure
 
-- [src](src): projekt-eigene Implementierung
-- [include](include): projekt-eigene Header
-- [hardware](hardware): Schaltplan, PCB, Gehaeuse und Hardware-Doku
-- [lib/Legoino](lib/Legoino): vendorte Legoino-Bibliothek mit projektspezifischen Anpassungen
-- [lib/NimBLE-Arduino](lib/NimBLE-Arduino): vendorte BLE-Bibliothek
+- [src](src): project-owned implementation
+- [include](include): project-owned headers
+- [hardware](hardware): schematic, PCB, enclosure, and hardware docs
+- [lib/Legoino](lib/Legoino): vendored Legoino library with project-specific adjustments
+- [lib/NimBLE-Arduino](lib/NimBLE-Arduino): vendored BLE library
 
 ## Build
 
-Hauptumgebung:
+Main environment:
 
 ```bash
 platformio run -e esp32-s3-fh4r2
@@ -94,46 +137,46 @@ Upload:
 platformio run -e esp32-s3-fh4r2 --target upload
 ```
 
-Serieller Monitor:
+Serial monitor:
 
 ```bash
 platformio device monitor --environment esp32-s3-fh4r2
 ```
 
-Diagnose-Umgebung fuer den ADC-Monitor:
+Diagnostic environment for the ADC monitor:
 
 ```bash
 platformio run -e esp32-s3-input-monitor
 ```
 
-## Hardwarevoraussetzungen
+## Hardware Requirements
 
-- ESP32-S3-Board mit RGB-LED und USB-C-Ladefunktion
-- 6 Taster am ADC-Widerstandsnetzwerk
-- 1 Drehencoder mit Drucktaster
-- LEGO DUPLO Zug-Hub
+- ESP32-S3 board with RGB LED and USB-C charging
+- 6 buttons on an ADC resistor ladder
+- 1 rotary encoder with push button
+- LEGO DUPLO train hub
 
-## Implementierungsdetails
+## Implementation Details
 
-- `TrainController.cpp` enthaelt die komplette Anwendungslogik, Eingabeverarbeitung, Sleep/Wake und UI-Status.
-- `DuploHub.cpp` kapselt BLE-Lifecycle, Queue-Verarbeitung, Sensor-Routing und Replay/Record.
-- `myLegoHub.cpp` enthaelt DUPLO-spezifische Legoino-Helfer.
-- Die Hub-Initialisierung nach Connect laeuft nicht blockierend im Main Loop, damit der BLE-Task nicht blockiert.
-- Reconnect-Scans laufen mit kuerzerem Suchfenster; dadurch wurde die reale Wiederverbindungszeit deutlich reduziert.
+- `TrainController.cpp` contains the full application logic, input processing, sleep/wake, and UI state.
+- `DuploHub.cpp` encapsulates BLE lifecycle, queue processing, sensor routing, and replay/record.
+- `myLegoHub.cpp` contains DUPLO-specific Legoino helper logic.
+- Post-connect hub initialization runs non-blocking in the main loop so the BLE task is not blocked.
+- Reconnect scans use a shorter search window, significantly reducing real-world reconnect time.
 
-## Dokumentation
+## Documentation
 
-- [ARCHITECTURE.md](ARCHITECTURE.md): technische Architektur und Laufzeitmodell
-- [Benutzerhandbuch_Kurz_DE.md](Benutzerhandbuch_Kurz_DE.md): kompakte Bedienanleitung
-- [hardware/Hardware.md](hardware/Hardware.md): Hardware-Hintergrund
-- [Kommunikation intern/Protokolle/Projekt-Tagesprotokoll.md](Kommunikation%20intern/Protokolle/Projekt-Tagesprotokoll.md): Arbeitsprotokoll
+- [ARCHITECTURE.md](ARCHITECTURE.md): technical architecture and runtime model
+- [User Manual.md](User%20Manual.md): user operating guide
+- [hardware/Hardware.md](hardware/Hardware.md): hardware background
+- [Kommunikation intern/Protokolle/Projekt-Tagesprotokoll.md](Kommunikation%20intern/Protokolle/Projekt-Tagesprotokoll.md): work log
 
-## Offene Themen
+## Open Topics
 
-Aktuell noch relevant sind vor allem:
+Currently most relevant:
 
-- weitere Facade-Konsolidierung ueber `myLegoHub`
-- moegliche Pairing-/Praeferenzlogik fuer einen bevorzugten Zug
-- Hardwareseitige Controller-Batterieueberwachung
+- further facade consolidation through `myLegoHub`
+- potential pairing/preference logic for a preferred train
+- hardware-level controller battery monitoring
 
-Die detailierte Arbeitsliste steht in [ToDo.md](ToDo.md).
+The detailed work list is in [ToDo.md](ToDo.md).

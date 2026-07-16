@@ -1,19 +1,19 @@
-# Projekt-Tagesprotokoll
+# Project Daily Log
 
 ## 2026-03-19
 
-- Ursache fuer die wahrgenommene Verzoegerung nach BLE-Verbindungsaufbau analysiert.
-- Festgestellt, dass die Verbindungs-Callback-Logik den BLE-Task mehrere Sekunden blockiert hat und dadurch Befehle erst deutlich spaeter ausgefuehrt wurden.
-- Initialisierung des Duplo-Hubs in eine nicht-blockierende Schrittfolge im Main-Loop verschoben.
-- Neuer Ready-Zustand eingefuehrt: Blau signalisiert weiterhin "verbunden, Initialisierung laeuft", Gruen blinkt erst, wenn Befehle tatsaechlich verarbeitet werden koennen.
-- Eingaben fuer Buttons und Drehgeber bis zum Ready-Zustand sauber gesperrt.
-- Firmware erfolgreich mit `platformio run -e esp32-s3-fh4r2` gebaut.
-- Reconnect-Verzoegerung nach Aus- und Einschalten des Zuges weiter analysiert.
-- Legoino-Scanfenster fuer Wiederverbindung von 10 s auf 2 s verkuerzt und wiederholtes Neustarten der Suche in jeder BLE-Schleife verhindert.
-- BLE-Client-Verbindungsparameter auf kuerzeren Supervision-Timeout abgestimmt, damit Stromverlust des Zuges schneller erkannt wird.
-- Firmware nach Reconnect-Tuning erneut erfolgreich mit `platformio run -e esp32-s3-fh4r2` gebaut.
-- Hardwaretest bestaetigt: Reconnect nach Aus- und Einschalten des Zuges nun in ca. 2-3 s.
-- Hardwaretest bestaetigt: Nach dem Reconnect reagiert der Zug sofort auf Befehle.
-- Projektinterne Header-Dateien mit konsistenteren `@file`-, Klassen- und API-Beschreibungen erweitert.
-- `README.md`, `ARCHITECTURE.md` und `Benutzerhandbuch_Kurz_DE.md` auf den aktuell implementierten Ready-, Reconnect- und Sleep/Wake-Stand synchronisiert.
-- `Refactorings.md` als technische Historie gestrafft und `ToDo.md` auf noch offene Themen reduziert.
+- Analyzed the cause of perceived delay after BLE connection establishment.
+- Determined that the connection callback logic blocked the BLE task for several seconds, which delayed command execution significantly.
+- Moved DUPLO hub initialization into a non-blocking step sequence in the main loop.
+- Introduced a new ready state: blue still signals "connected, initialization running", and green starts blinking only when commands can actually be processed.
+- Correctly gated button and encoder input until ready state.
+- Successfully built firmware with `platformio run -e esp32-s3-fh4r2`.
+- Further analyzed reconnect delay after train power cycle.
+- Reduced Legoino reconnect scan window from 10 s to 2 s and prevented repeated restart of scan in every BLE loop.
+- Tuned BLE client connection parameters to a shorter supervision timeout so train power loss is detected faster.
+- Successfully rebuilt firmware after reconnect tuning with `platformio run -e esp32-s3-fh4r2`.
+- Hardware test confirmed: reconnect after train power cycle now in about 2-3 s.
+- Hardware test confirmed: after reconnect, the train responds to commands immediately.
+- Extended project-internal header files with more consistent `@file`, class, and API descriptions.
+- Synchronized `README.md`, `ARCHITECTURE.md`, and `Benutzerhandbuch_Kurz_DE.md` with the currently implemented ready, reconnect, and sleep/wake behavior.
+- Streamlined `Refactorings.md` as technical history and reduced `ToDo.md` to still-open topics.

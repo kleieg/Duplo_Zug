@@ -1,53 +1,53 @@
 # Refactorings
 
-Dieses Dokument ist weiterhin relevant, aber jetzt klar als historisches und technisches Arbeitsprotokoll eingeordnet.
+This document is still relevant, but is now clearly categorized as a historical and technical work log.
 
-## Zweck dieses Dokuments
+## Purpose Of This Document
 
-Die Datei dokumentiert groessere strukturelle Umbauten, die nicht nur Features hinzufuegen, sondern die Wartbarkeit, Latenz oder Verantwortungsverteilung verbessert haben.
+This file documents larger structural changes that do more than add features: they improve maintainability, latency, or separation of responsibilities.
 
-Sie ist damit:
+It is therefore:
 
-- weiterhin relevant als Architektur- und Wartungshistorie
-- nicht als vollstaendige Aufgabenliste gedacht
-- nicht als Ersatz fuer [ToDo.md](ToDo.md) gedacht
+- still relevant as architecture and maintenance history
+- not intended as a complete task list
+- not intended as a replacement for [ToDo.md](ToDo.md)
 
-## Wichtige bereits umgesetzte Refactorings
+## Important Refactorings Already Implemented
 
-- Bereinigung toter und ungenutzter Pfade in `TrainController`
-- Konsolidierung der `DuploHub`-Command-Erzeugung
-- Entprellung des Farbsensors ueber Stabilitaets-Timer
-- Optimierung von LED-Updates ueber Dirty-Flag in `StatusLED`
-- Trennung von `connected` und `ready`
-- Verlagerung der Post-Connect-Initialisierung aus dem BLE-Callback in einen nicht-blockierenden Main-Loop-Ablauf
-- Beschleunigung von Init, Reconnect und Befehlsannahme durch reduzierte Delays und kuerzere Reconnect-Scans
+- cleanup of dead and unused paths in `TrainController`
+- consolidation of `DuploHub` command construction
+- color sensor debouncing via stability timer
+- optimization of LED updates via dirty flag in `StatusLED`
+- separation of `connected` and `ready`
+- moved post-connect initialization out of BLE callback into a non-blocking main-loop flow
+- faster init, reconnect, and command acceptance via reduced delays and shorter reconnect scans
 
-## Aktuell noch laufende Refactoring-Linie
+## Refactoring Track Currently In Progress
 
-### Legoino-Konsolidierung ueber `myLegoHub`
+### Legoino Consolidation Via `myLegoHub`
 
-Dieser Themenblock ist weiterhin relevant.
+This topic remains relevant.
 
-Ziel:
+Goal:
 
-- `DuploHub` soll nur gegen eine stabile Projekt-Fassade arbeiten
-- DUPLO-spezifische Low-Level-Details sollen in `myLegoHub` konzentriert werden
-- direkte Abhaengigkeit von Legoino-Interna soll weiter reduziert werden
+- `DuploHub` should work only against a stable project facade
+- DUPLO-specific low-level details should be concentrated in `myLegoHub`
+- direct dependency on Legoino internals should be reduced further
 
-Naechste sinnvolle Schritte:
+Next sensible steps:
 
-1. benoetigte API in `myLegoHub` explizit vervollstaendigen
-2. direkte `hub.*`-Aufrufe in `DuploHub` schrittweise auf diese Facade umstellen
-3. pro Migrationsscheibe Build und Hardwaretest durchfuehren
+1. explicitly complete the required API in `myLegoHub`
+2. migrate direct `hub.*` calls in `DuploHub` to this facade step by step
+3. run build and hardware test for each migration slice
 
-## Nicht mehr als aktive Refactoring-Baustelle relevant
+## No Longer Relevant As Active Refactoring Topic
 
-Die folgenden Punkte sind abgeschlossen und brauchen keine weitere eigene Tracking-Struktur mehr:
+The following points are completed and no longer need a separate tracking structure:
 
-- SystemMemory-Dateibenennung und Konsistenz
-- Replay-Endlosschleife entfernt
-- unimplementierte `DuploHub`-Header-API bereinigt
-- Wasser-Button-Verhalten korrigiert
-- Status-LED-Grundlogik vereinheitlicht
+- SystemMemory file naming and consistency
+- replay endless loop removed
+- unimplemented `DuploHub` header API cleaned up
+- water button behavior corrected
+- status LED base logic unified
 
-Stand: 19.03.2026
+Status: 19.03.2026

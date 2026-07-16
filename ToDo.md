@@ -1,44 +1,44 @@
 # ToDo
 
-Diese Datei ist weiterhin relevant.
+This file is still relevant.
 
-Sie wurde auf den aktuellen Stand bereinigt und enthaelt jetzt nur noch offene oder bewusst zurueckgestellte Themen. Bereits erledigte Punkte wurden in die laufende Dokumentation, den Changelog oder das Tagesprotokoll ueberfuehrt.
+It has been cleaned up to the current state and now contains only open or intentionally deferred topics. Completed items were moved to ongoing documentation, the changelog, or the daily project log.
 
-## Offene Software-Themen
+## Open Software Topics
 
-- Legoino-Konsolidierung ueber `myLegoHub`-Facade weiter umsetzen
-  - Projekt-API in `myLegoHub` erweitern
-  - `DuploHub` schrittweise auf die Facade umstellen
-  - Hardwaretests pro Migrationsschritt durchfuehren
+- continue Legoino consolidation via the `myLegoHub` facade
+  - extend the project API in `myLegoHub`
+  - migrate `DuploHub` to the facade step by step
+  - run hardware tests for each migration step
 
-- Logging weiter aufraeumen
-  - Debug-Ausgaben auf sinnvolle Betriebs- und Diagnosepfade fokussieren
-  - ggf. Build-Flag-basierte Log-Tiefen trennen
+- further clean up logging
+  - focus debug output on meaningful runtime and diagnostics paths
+  - optionally separate log levels via build flags
 
-## Offene Produkt-/Feature-Themen
+## Open Product/Feature Topics
 
-- bevorzugten Zug speichern und bei Wiederverbindung priorisieren
-- Pairing-Konzept nur weiterverfolgen, wenn Bedienung fuer Kinder einfach bleibt
+- store a preferred train and prioritize it during reconnect
+- continue pairing concept only if usage remains simple for children
 
-## Offene Hardware-Themen
+## Open Hardware Topics
 
-- echte Ueberwachung der Controller-Batterie nur mit Hardware-Anpassung
-- moegliche zusaetzliche Taste fuer Pairing nur sinnvoll, wenn Pairing-Funktion wirklich umgesetzt wird
+- true controller battery monitoring requires hardware changes
+- an additional pairing button is only useful if pairing is actually implemented
 
-## Bewusst zurueckgestellt
+## Intentionally Deferred
 
-- umfangreicher Pairing-Workflow mit Fallback nach 60 Sekunden
-  - fachlich denkbar, aktuell aber nicht priorisiert
-  - nur weiter sinnvoll, wenn Mehrzug-Betrieb wirklich benoetigt wird
+- extensive pairing workflow with 60-second fallback
+  - technically feasible, but currently not prioritized
+  - only useful if multi-train operation is truly required
 
-## Erledigt und deshalb nicht mehr hier getrackt
+## Completed And No Longer Tracked Here
 
-- Replay laeuft nur noch einmal
-- Eingaben waehrend Replay korrekt eingeschraenkt
-- Farbsensor entprellt
-- Sleep/Wake implementiert
-- Init- und Reconnect-Latenz deutlich reduziert
-- Ready-Zustand korrekt von BLE-Connected getrennt
-- Reconnect nach Power-Cycle auf etwa 2 bis 3 Sekunden verbessert
+- replay now runs only once
+- input during replay is correctly restricted
+- color sensor debounced
+- sleep/wake implemented
+- init and reconnect latency significantly reduced
+- ready state correctly separated from BLE connected
+- reconnect after power-cycle improved to about 2 to 3 seconds
 
-Stand: 19.03.2026
+Status: 19.03.2026
