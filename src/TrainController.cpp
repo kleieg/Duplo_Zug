@@ -99,7 +99,8 @@ ONLY ON ESP32-S3 DEVKITC-1 WITH DUAL CORE
 #define ENCODER_STEPS_PER_DETENT 8 // Higher sensitivity than the library default of 4
 
 // Create rotary encoder instance
-RotaryEncoder rotaryEncoder = RotaryEncoder(ENCODER_A, ENCODER_B, RE_DEFAULT_PIN, RE_DEFAULT_PIN, ENCODER_STEPS_PER_DETENT); //, ENCODER_BTN);
+//RotaryEncoder rotaryEncoder = RotaryEncoder(ENCODER_A, ENCODER_B, RE_DEFAULT_PIN, RE_DEFAULT_PIN, ENCODER_STEPS_PER_DETENT); //, ENCODER_BTN);
+RotaryEncoder rotaryEncoder(ENCODER_A, ENCODER_B, RE_DEFAULT_PIN, RE_DEFAULT_PIN, ENCODER_STEPS_PER_DETENT); //, ENCODER_BTN);
 
 // Onboard RGB LED
 #define DATA_PIN 48
