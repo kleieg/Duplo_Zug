@@ -61,7 +61,8 @@ ONLY ON ESP32-S3 DEVKITC-1 WITH DUAL CORE
 #include "DuploHub.h"
 #include "SystemMemory.h"
 
-#undef DEBUG // Enable debug logging
+//  #undef DEBUG // Enable debug logging
+#define DEBUG // Enable debug logging
 #include "debug.h"
 #include "ADCButton.h"
 #include "StatusLED.h"

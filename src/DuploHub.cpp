@@ -44,7 +44,8 @@
 #include "esp_timer.h"
 #include "esp_err.h"
 
-#define DEBUG // Enable debug logging
+//  #define DEBUG // Enable debug logging
+#undef DEBUG // Enable debug logging
 #include "debug.h"
 
 // Initialize static instance pointer

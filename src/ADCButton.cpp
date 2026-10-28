@@ -38,7 +38,8 @@
 
 #include "ADCButton.h"
 
-#define DEBUG // Enable debug logging
+//   #define DEBUG // Enable debug logging
+#undef DEBUG // Enable debug logging
 #include "debug.h"
 
 /**
