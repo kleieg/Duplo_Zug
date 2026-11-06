@@ -404,7 +404,9 @@ void handleButtons(int btn_no, bool pressed)
     }
 }
 
-// Sets the speed of the currently selected train
+// Speed range of the dial. Below MIN_SPEED the DUPLO motor barely moves, so the dial skips that
+// zone: from standstill the first click jumps to +/-MIN_SPEED, the next click down returns to 0.
+// Raise MIN_SPEED if the train does not start reliably at the first click.
 #define MIN_SPEED 10
 #define MAX_SPEED 100
 #define SPEED_INC 5
@@ -426,7 +428,7 @@ static void onEncoderTurned(long value)
  *
  * Speed commands are rate-limited to one per `POTI_DELAY`, but the newest value is kept pending
  * instead of being dropped, so the train always ends up at the speed the knob was turned to.
- * Stops the train if the knob is in the zero zone.
+ * The stop zone below `MIN_SPEED` is skipped so every click changes something (see `MIN_SPEED`).
  */
 static void processEncoder()
 {
@@ -456,7 +458,22 @@ static void processEncoder()
     // Clear the flag before reading the value: a turn arriving in between sets it again.
     encoderValuePending.store(false);
     const long requestedSpeed = -pendingEncoderValue.load();
-    const int newSpeed = (requestedSpeed > -MIN_SPEED && requestedSpeed < MIN_SPEED) ? 0 : (int)requestedSpeed;
+    int newSpeed = (int)requestedSpeed;
+
+    // Skip the stop zone: leaving standstill jumps to +/-MIN_SPEED, coming down from a running
+    // speed goes straight to 0. The knob is moved along so the next click continues from there.
+    if (requestedSpeed != 0 && requestedSpeed > -MIN_SPEED && requestedSpeed < MIN_SPEED)
+    {
+        if (lastSpeed == 0)
+        {
+            newSpeed = (requestedSpeed > 0) ? MIN_SPEED : -MIN_SPEED;
+        }
+        else
+        {
+            newSpeed = 0;
+        }
+        rotaryEncoder.setEncoderValue(-newSpeed); // encoder value = -speed
+    }
 
     if (newSpeed == lastSpeed)
     {
