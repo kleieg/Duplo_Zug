@@ -27,7 +27,7 @@ The implementation emphasizes low perceived latency:
 
 ### Queue model
 
-- `commandQueue` (10 entries): main loop to BLE task; the BLE task waits on it (no polling), so a command goes out immediately; every hub write is followed by a 20 ms pause (200 ms after the one-time device activations at connect, which the hub drops if they come too fast), and a write the BLE stack rejects (no free buffer) is retried in `Lpf2Hub::WriteValue()` instead of being lost
+- `commandQueue` (10 entries): main loop to BLE task; the BLE task waits on it (no polling), so a command goes out immediately; every command is followed by a 200 ms pause, because the DUPLO hub silently drops commands that arrive closer together (the BLE stack accepts them, only spacing helps); tile handlers send the motor command first, so only the following sound/LED wait; a write the BLE stack rejects (no free buffer) is retried in `Lpf2Hub::WriteValue()` instead of being lost
 - `responseQueue` (100 entries): BLE task to main loop (sensor events)
 
 ### Shared synchronization
@@ -129,7 +129,7 @@ The color sensor is noisy on reflective surfaces. To reduce false triggers:
 - a one-shot ESP timer waits for 80 ms stability (short enough to register a tile at full speed)
 - only stable transitions are pushed into `responseQueue`
 
-Color bricks are handled entirely by the controller (the hub does nothing on its own while connected; ignored during record and replay). The motor command is always sent first, sound and LED after it. RED stops; GREEN reverses directly (from standstill starts at 40), further GREEN detections are ignored for 1 s so the reversing train does not reverse again on the same tile; BLUE stops for 2.5 s with the water sound and then continues at the previous speed (dial or STOP during the pause win); YELLOW horn; WHITE toggles the train light.
+Color bricks are handled entirely by the controller (the hub does nothing on its own while connected; ignored during record and replay). The motor command is always sent first, sound and LED after it. Only the five action colors react; black (track gaps) and other colors are ignored. RED stops; GREEN reverses directly (from standstill starts at 40), further GREEN detections are ignored for 1 s so the reversing train does not reverse again on the same tile; BLUE stops for 2.5 s with the water sound and then continues at the previous speed (dial or STOP during the pause win); YELLOW horn; WHITE toggles the train light.
 
 ### Speed sensor
 

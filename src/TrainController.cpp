@@ -584,10 +584,6 @@ static void detectedColorCb(DuploEnums::DuploColor color)
 
     switch (color)
     {
-    case DuploEnums::DuploColor::BLACK:
-        DEBUG_LOG("TrainController:  Detected Color: %d", DuploEnums::DuploColor::BLACK);
-        duploHub.setLedColor(DuploEnums::DuploColor::BLACK); // train light off; controller LED unchanged
-        break;
 
     case DuploEnums::DuploColor::RED:
         DEBUG_LOG("TrainController:  Detected Color: %d", DuploEnums::DuploColor::RED);
@@ -663,8 +659,9 @@ static void detectedColorCb(DuploEnums::DuploColor color)
         break;
 
     default:
-        DEBUG_LOG("TrainController:  Default Color action: %d", color);
-        duploHub.setLedColor(color);
+        // Not an action tile (black track gaps, other colors, sensor noise): no reaction. Sending a
+        // command for each of these would flood the hub, which then drops the important ones.
+        break;
     }
 }
 

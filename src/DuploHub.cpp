@@ -58,18 +58,17 @@ namespace
     // registered at full speed (was 250 ms: tiles were missed and reactions came too late);
     // increase if reflective surfaces cause false tile detections.
     constexpr uint64_t COLOR_SETTLE_DELAY_US = 80000; // 80 ms debounce window
-    // Pause after each BLE write. Lost writes are retried in Lpf2Hub::WriteValue(), so this only
-    // spaces commands roughly by one BLE connection event (was 20 ms motor / 200 ms others).
-    constexpr uint32_t COMMAND_PACING_MS = 20;
+    // Pause after each command sent to the hub. The DUPLO hub silently drops a command that
+    // arrives too soon after the previous one (seen on hardware with 20 ms: random loss of
+    // stop/sound/LED commands and of sensor activations). The BLE stack accepts these writes, so
+    // only spacing helps. Tile handlers send the urgent motor command first, so this delays only
+    // the following sound/LED commands, not the reaction.
+    constexpr uint32_t COMMAND_PACING_MS = 200;
     // Maximum time the BLE task waits for a new command before doing its housekeeping.
     constexpr uint32_t COMMAND_WAIT_MS = 50;
     // After connecting, the hub announces its built-in devices one by one. A device must be
     // announced before it can be activated (Legoino silently ignores unknown ports).
     constexpr uint32_t DEVICE_ATTACH_TIMEOUT_MS = 2000;
-    // Pause after each device activation (port setup), once per connection. The hub drops a port
-    // setup that arrives too soon after the previous one (seen on hardware: color and speed
-    // sensor stayed silent with 20 ms spacing, only the later voltage sensor worked).
-    constexpr uint32_t ACTIVATION_PACING_MS = 200;
     constexpr uint32_t BLE_TASK_WDT_TIMEOUT_S = 15;    // task watchdog timeout for the BLE task
     constexpr UBaseType_t COMMAND_QUEUE_LENGTH = 10;   // main loop -> BLE task
     constexpr UBaseType_t RESPONSE_QUEUE_LENGTH = 100; // BLE task -> main loop (sensor bursts)
@@ -1155,9 +1154,9 @@ bool DuploHub::waitForHubDevice(byte port, const char *name)
 /**
  * @brief Process commands from the command queue (runs in BLE task).
  *
- * Waits up to `firstWait` for the first command, then drains the queue. Every hub write is
- * followed by the same short `COMMAND_PACING_MS` pause; failed writes are retried inside
- * `Lpf2Hub::WriteValue()`.
+ * Waits up to `firstWait` for the first command, then drains the queue. Every command is
+ * followed by the `COMMAND_PACING_MS` pause the hub needs; writes the BLE stack rejects are
+ * retried inside `Lpf2Hub::WriteValue()`.
  *
  * @param firstWait Maximum time to block for the first command.
  */
@@ -1268,12 +1267,7 @@ void DuploHub::processCommandQueue(TickType_t firstWait)
             break;
         }
 
-        const bool isActivation = (cmd.type == CommandType::CMD_ACTIVATE_RGB_LIGHT ||
-                                   cmd.type == CommandType::CMD_ACTIVATE_BASE_SPEAKER ||
-                                   cmd.type == CommandType::CMD_ACTIVATE_COLOR_SENSOR ||
-                                   cmd.type == CommandType::CMD_ACTIVATE_SPEED_SENSOR ||
-                                   cmd.type == CommandType::CMD_ACTIVATE_VOLTAGE_SENSOR);
-        delay(isActivation ? ACTIVATION_PACING_MS : COMMAND_PACING_MS);
+        delay(COMMAND_PACING_MS);
     }
 }
 
