@@ -29,7 +29,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Buttons: averaging/settling reduced from 10 to 3 samples, so a press registers after ~0.12-0.15 s instead of ~0.5 s.
 - Status LED bursts showed the last blink for only one loop cycle (~20 ms); bursts now run for N full on/off cycles.
 - PLAY with an empty recording no longer leaves the controller in a stuck "replay" state (buttons locked, no sleep).
-- Fast blue upload-mode blinking no longer continues after the upload window closes.
 - Encoder: fast knob turns no longer get lost; speed commands are still rate-limited (250 ms) but the latest value is always applied, so train speed matches the knob.
 - Encoder: callback (esp_timer task) no longer blocks with `delay()` or touches app state; handling moved to the main loop.
 - Sleep: before entering sleep the controller ends record/replay, stops the motor and actively disconnects the hub; a running replay counts as activity.
