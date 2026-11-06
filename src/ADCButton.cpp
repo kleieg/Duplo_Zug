@@ -83,26 +83,47 @@ ADCButtons::ADCButtons(int adc_pin, int samples, int margin, int resolution, int
     analogReadResolution(this->resolution);
     pinMode(this->adcPin, INPUT);
 
-    // Allocate memory for the values array
-    values = new int[samples](); // () initializes all elements to 0
-
-    // Initialize all values to 0
-    for (int i = 0; i < samples; i++)
-    {
-        values[i] = 0;
-    }
+    // Allocate the sample buffer with the validated size; () initializes all elements to 0
+    values = new int[this->samples]();
 
     // Start with capacity for 5 buttons (can grow dynamically)
-    buttonCapacity = 5;
-    buttons = new ButtonState[buttonCapacity]();
+    ensureCapacity(5);
+}
 
-    for (int i = 0; i < buttonCapacity; i++)
+/**
+ * @brief Grow the button table so that `requiredCapacity` slots exist.
+ *
+ * Grows to at least `requiredCapacity` or double the current capacity, whichever is larger.
+ * Existing buttons are copied; new slots are marked unused (`adcValue = -1`).
+ *
+ * @param requiredCapacity Minimum number of slots needed.
+ */
+void ADCButtons::ensureCapacity(int requiredCapacity)
+{
+    if (requiredCapacity <= buttonCapacity)
     {
-        buttons[i].adcValue = -1; // Mark all slots as unused until configured
-        buttons[i].adcMin = -1;
-        buttons[i].adcMax = -1;
-        buttons[i].pressed = false;
+        return;
     }
+
+    const int newCapacity = (requiredCapacity > buttonCapacity * 2) ? requiredCapacity : buttonCapacity * 2;
+    ButtonState *newButtons = new ButtonState[newCapacity]();
+
+    for (int i = 0; i < buttonCount; i++)
+    {
+        newButtons[i] = buttons[i];
+    }
+
+    for (int i = buttonCount; i < newCapacity; i++)
+    {
+        newButtons[i].adcValue = -1; // Mark as unused until configured
+        newButtons[i].adcMin = -1;
+        newButtons[i].adcMax = -1;
+        newButtons[i].pressed = false;
+    }
+
+    delete[] buttons;
+    buttons = newButtons;
+    buttonCapacity = newCapacity;
 }
 
 /**
@@ -159,33 +180,6 @@ void ADCButtons::addButton(int button_no, int adcValue)
         return; // Invalid ADC value for current resolution
     }
 
-    // Check if we need to resize the array to accommodate the button number
-    int requiredCapacity = button_no + 1;
-    if (requiredCapacity > buttonCapacity)
-    {
-        // Expand capacity to at least the required size, or double current capacity, whichever is larger
-        int newCapacity = (requiredCapacity > buttonCapacity * 2) ? requiredCapacity : buttonCapacity * 2;
-        ButtonState *newButtons = new ButtonState[newCapacity]();
-
-        // Copy existing buttons
-        for (int i = 0; i < buttonCount; i++)
-        {
-            newButtons[i] = buttons[i];
-        }
-
-        // Initialize new slots to default values
-        for (int i = buttonCount; i < newCapacity; i++)
-        {
-            newButtons[i].adcValue = -1; // Mark as unused
-            newButtons[i].pressed = false;
-        }
-
-        // Delete old array and update pointer
-        delete[] buttons;
-        buttons = newButtons;
-        buttonCapacity = newCapacity;
-    }
-
     addButtonRange(button_no, adcValue - margin, adcValue + margin);
 }
 
@@ -225,29 +219,7 @@ void ADCButtons::addButtonRange(int button_no, int adcMin, int adcMax)
         adcMax = maxAdcValue;
     }
 
-    const int requiredCapacity = button_no + 1;
-    if (requiredCapacity > buttonCapacity)
-    {
-        const int newCapacity = (requiredCapacity > buttonCapacity * 2) ? requiredCapacity : buttonCapacity * 2;
-        ButtonState *newButtons = new ButtonState[newCapacity]();
-
-        for (int i = 0; i < buttonCount; i++)
-        {
-            newButtons[i] = buttons[i];
-        }
-
-        for (int i = buttonCount; i < newCapacity; i++)
-        {
-            newButtons[i].adcValue = -1;
-            newButtons[i].adcMin = -1;
-            newButtons[i].adcMax = -1;
-            newButtons[i].pressed = false;
-        }
-
-        delete[] buttons;
-        buttons = newButtons;
-        buttonCapacity = newCapacity;
-    }
+    ensureCapacity(button_no + 1);
 
     buttons[button_no].adcMin = adcMin;
     buttons[button_no].adcMax = adcMax;
@@ -271,17 +243,10 @@ void ADCButtons::addButtonRange(int button_no, int adcMin, int adcMax)
  * - Updates pressed state for all registered buttons
  *
  * Should be called regularly in the main program loop.
- * Uses static variables to maintain state between calls.
+ * Sampling state is kept per instance, so several ADCButtons objects can coexist.
  */
 void ADCButtons::updateButtons()
 {
-    // Static variables to maintain state between calls
-    static int currentIndex = 0;
-    static bool bufferFilled = false;
-    static unsigned long lastUpdate = 0;
-    static int lastRawAdcValue = -1;
-    static int settlingSamplesRemaining = 0;
-
     // Throttle ADC readings to avoid excessive sampling
     if (millis() - lastUpdate < debounceTime)
     {
@@ -297,7 +262,6 @@ void ADCButtons::updateButtons()
     {
         settlingSamplesRemaining = samples;
         currentIndex = 0;
-        bufferFilled = false;
         DEBUG_LOG("ADCButtons: Detected ADC step from %d to %d, waiting for capacitor settling (%d samples)", lastRawAdcValue, adcValue, settlingSamplesRemaining);
     }
     lastRawAdcValue = adcValue;
@@ -315,18 +279,14 @@ void ADCButtons::updateButtons()
         }
 
         currentIndex = 0;
-        bufferFilled = false;
         DEBUG_LOG("ADCButtons: Settling phase finished, collecting fresh samples");
         return;
     }
 
-    // Mark buffer as filled after first complete cycle
-    if (currentIndex == 0)
-        bufferFilled = true;
-    else
+    // Evaluate only once per complete buffer cycle (after settling the buffer starts at index 0)
+    if (currentIndex != 0)
         return; // Not enough samples yet, skip this update
 
-    // Only use samples if buffer has been filled at least once
     min = (1 << resolution) - 1; // Reset min to max possible ADC value
     max = 0;                     // Reset max to 0
     int sum = 0;

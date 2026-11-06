@@ -82,8 +82,20 @@ private:
     int buttonCount = 0;            ///< Current number of registered buttons
     int buttonCapacity = 0;         ///< Current capacity of buttons array
 
+    // Sampling state (per instance)
+    int currentIndex = 0;                 ///< Next write position in the circular sample buffer
+    unsigned long lastUpdate = 0;         ///< Time of the last ADC sample (ms)
+    int lastRawAdcValue = -1;             ///< Previous raw sample, used to detect level steps
+    int settlingSamplesRemaining = 0;     ///< Samples to skip after a level step (capacitor settling)
+
     // Callback management
     buttonCallback callback = nullptr; ///< Optional callback function for button state changes
+
+    /**
+     * @brief Grow the button table so that `requiredCapacity` slots exist.
+     * @param requiredCapacity Minimum number of slots needed.
+     */
+    void ensureCapacity(int requiredCapacity);
 
 public:
     /**
