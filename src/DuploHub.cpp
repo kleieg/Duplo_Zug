@@ -419,7 +419,7 @@ const HubCommand *DuploHub::getNextReplayCommand()
     }
 
     const HubCommand &nextCmd = commandBuffer[replayIndex];
-    if (totalElapsedTime >= nextCmd.timestamp)
+    if ((int64_t)totalElapsedTime >= nextCmd.timestamp)
     {
         replayIndex++;
         DEBUG_LOG("DuploHub: Retrieved replay command %zu/%zu (type: %d) time: %llu us",
@@ -1150,6 +1150,15 @@ void DuploHub::updateBLE()
     // Update thread-safe state variables
     updateConnectionState(hubConnected, hubConnecting);
 
+    // The controller is about to sleep: no scans, no reconnects, no connection edge callbacks.
+    if (sleepRequested.load())
+    {
+        scanAttemptActive = false;
+        lastScanStartMs = 0;
+        lastConnected = hubConnected;
+        return;
+    }
+
     // Discovery is throttled so scans are not restarted on every BLE loop iteration.
     if (hubDisconnected)
     {
@@ -1255,6 +1264,21 @@ void DuploHub::processCommandQueue()
     // Process all available commands (non-blocking)
     while (xQueueReceive(commandQueue, &cmd, 0) == pdTRUE)
     {
+        // Sleep preparation must always be acknowledged, even if the hub is already gone.
+        if (cmd.type == CommandType::CMD_STOP_AND_DISCONNECT)
+        {
+            if (hub.isConnected())
+            {
+                DEBUG_LOG("BLE Task: Stopping motor and disconnecting before sleep");
+                hub.stopBasicMotor((byte)DuploEnums::DuploTrainHubPort::MOTOR);
+                delay(100); // Let the stop command go out before the link is closed.
+                hub.disconnectHub();
+                delay(100);
+            }
+            linkShutdownComplete.store(true);
+            continue;
+        }
+
         // Commands are dropped while disconnected because replaying stale writes would be unsafe.
         if (!hub.isConnected())
         {
@@ -1338,6 +1362,49 @@ void DuploHub::processCommandQueue()
             break;
         }
     }
+}
+
+/**
+ * @brief Stop the motor and close the BLE link before the controller sleeps.
+ * @param timeoutMs Maximum time to wait for the BLE task to confirm.
+ * @return `true` if the BLE task confirmed stop + disconnect in time.
+ */
+bool DuploHub::shutdownLinkForSleep(uint32_t timeoutMs)
+{
+    linkShutdownComplete.store(false);
+    sleepRequested.store(true);
+
+    if (commandQueue == nullptr)
+    {
+        return false;
+    }
+
+    // Pending UI commands are irrelevant now; the stop must not wait behind them.
+    xQueueReset(commandQueue);
+
+    // Bypass sendCommand() so this internal command is never recorded for replay.
+    HubCommand cmd = createHubCommand(CommandType::CMD_STOP_AND_DISCONNECT);
+    if (xQueueSend(commandQueue, &cmd, pdMS_TO_TICKS(100)) != pdTRUE)
+    {
+        DEBUG_LOG("WARNING: Failed to queue stop-and-disconnect command");
+        return false;
+    }
+
+    const unsigned long start = millis();
+    while (!linkShutdownComplete.load() && (millis() - start) < timeoutMs)
+    {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    return linkShutdownComplete.load();
+}
+
+/**
+ * @brief Re-enable scanning and reconnects after a sleep that returned (light sleep).
+ */
+void DuploHub::resumeAfterSleep()
+{
+    linkShutdownComplete.store(false);
+    sleepRequested.store(false);
 }
 
 /**

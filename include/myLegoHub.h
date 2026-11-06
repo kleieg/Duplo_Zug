@@ -130,6 +130,9 @@ public:
      */
     void setLedColor(Color color);
 
+    /** @brief Actively close the BLE link to the connected hub, if any. */
+    void disconnectHub();
+
     /**
      * @brief Map the raw speedometer count into a normalized range.
      * @param rawSpeed Raw speed reading as delivered by Legoino.

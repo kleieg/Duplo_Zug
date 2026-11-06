@@ -73,6 +73,8 @@ ONLY ON ESP32-S3 DEVKITC-1 WITH DUAL CORE
 
 #include <ESP32RotaryEncoder.h>
 
+#include <atomic>
+
 #define DELAY_TIME 100 // delay in ms
 
 // Pin declaration
@@ -128,6 +130,17 @@ static bool emergencyStop = false;
 static bool recording = false;
 static bool replay = false; // true when a sequence is being replayed
 static bool hubReady = false;
+
+// Last motor speed commanded by the controller (0 = stopped). Only touched from the main loop.
+static int lastSpeed = 0;
+
+// Hand-over from other execution contexts into the main loop. The encoder callback runs in the
+// esp_timer task and the connection callbacks run in the BLE task (core 0); they only set these
+// flags, all UI and state work happens in loop() on core 1.
+static std::atomic<long> pendingEncoderValue{0};
+static std::atomic<bool> encoderValuePending{false};
+static std::atomic<bool> hubConnectedEventPending{false};
+static std::atomic<bool> hubDisconnectedEventPending{false};
 
 ADCButtons guiButtons = ADCButtons(ADC_PIN);
 
@@ -371,7 +384,9 @@ void handleButtons(int btn_no, bool pressed)
             delay(DELAY_TIME);
             duploHub.stopMotor();
             delay(DELAY_TIME); // Stop the motor immediately
+            lastSpeed = 0;
             rotaryEncoder.setEncoderValue(0);
+            encoderValuePending.store(false); // Discard knob input that predates the stop
         }
         else
         {
@@ -396,54 +411,63 @@ void handleButtons(int btn_no, bool pressed)
 #define SPEED_INC 5
 #define POTI_DELAY 250
 
-static int lastSpeed = 0; // holds current mapping of poti setting to speed
+/**
+ * @brief Encoder callback; runs in the esp_timer task of the encoder library.
+ *
+ * Must stay short and non-blocking: it only hands the latest value to the main loop.
+ */
+static void onEncoderTurned(long value)
+{
+    pendingEncoderValue.store(value);
+    encoderValuePending.store(true);
+}
 
 /**
- * @brief Handles potentiometer input and sets train speed accordingly.
+ * @brief Apply the latest encoder value as train speed (main loop).
  *
- * Stops the train if emergency stop is active or if the potentiometer is in the zero zone.
+ * Speed commands are rate-limited to one per `POTI_DELAY`, but the newest value is kept pending
+ * instead of being dropped, so the train always ends up at the speed the knob was turned to.
+ * Stops the train if the knob is in the zero zone.
  */
-static void handleEncoder(long speed)
+static void processEncoder()
 {
-    static long lastCall = millis();
-    const long requestedSpeed = -speed;
+    static unsigned long lastSpeedCommandMs = 0;
 
-    DEBUG_LOG("TrainController: Set motor speed to %d", requestedSpeed);
-
-    if (!hubReady)
+    if (!encoderValuePending.load())
     {
         return;
     }
 
-    if (emergencyStop)
+    // Turns while not ready or during emergency stop are discarded and the knob is re-centered,
+    // so the knob position and the train speed stay in sync.
+    if (!hubReady || emergencyStop)
     {
-        duploHub.setMotorSpeed(0);        // Stop the motor immediately
-        rotaryEncoder.setEncoderValue(0); // Reset encoder value
-        delay(DELAY_TIME);
-        DEBUG_LOG("TrainController: Emergency stop activated, motor speed set to 0");
-        return; // Exit if emergency stop is active
+        encoderValuePending.store(false);
+        rotaryEncoder.setEncoderValue(0);
+        return;
     }
 
-    if (millis() - lastCall > POTI_DELAY)
-    {
-        lastCall = millis(); // Update last call time
+    lastUserActionTime = millis();
 
-        // if emergencyStop triggered or poti in zero zone
-        if (requestedSpeed > -MIN_SPEED && requestedSpeed < MIN_SPEED)
-        {
-            duploHub.setMotorSpeed(0);
-            lastSpeed = 0; // Reset lastSpeed to avoid repeated calls
-        }
-        else
-        {
-            // train speed changed
-            lastUserActionTime = millis();
-            duploHub.setMotorSpeed(requestedSpeed);
-            lastSpeed = requestedSpeed;
-        }
-        delay(DELAY_TIME);
-        DEBUG_LOG("TrainController: Set motor speed to %d", lastSpeed);
+    if (millis() - lastSpeedCommandMs < POTI_DELAY)
+    {
+        return; // keep pending, applied on a later loop iteration
     }
+
+    // Clear the flag before reading the value: a turn arriving in between sets it again.
+    encoderValuePending.store(false);
+    const long requestedSpeed = -pendingEncoderValue.load();
+    const int newSpeed = (requestedSpeed > -MIN_SPEED && requestedSpeed < MIN_SPEED) ? 0 : (int)requestedSpeed;
+
+    if (newSpeed == lastSpeed)
+    {
+        return;
+    }
+
+    duploHub.setMotorSpeed(newSpeed);
+    lastSpeed = newSpeed;
+    lastSpeedCommandMs = millis();
+    DEBUG_LOG("TrainController: Set motor speed to %d", lastSpeed);
 }
 
 // Function to process the responseQueue and print detected color
@@ -464,6 +488,14 @@ static void detectedColorCb(DuploEnums::DuploColor color)
     DEBUG_LOG("TrainController:  Detected Color: %d", color);
 
     detectedColor = color; // Store the detected color
+
+    // Emergency stop has priority: a stopped train that is pushed onto a tile must not drive off.
+    if (emergencyStop)
+    {
+        DEBUG_LOG("TrainController: Color action ignored during emergency stop");
+        return;
+    }
+
     switch (color)
     {
     case DuploEnums::DuploColor::BLACK:
@@ -483,7 +515,9 @@ static void detectedColorCb(DuploEnums::DuploColor color)
         delay(DELAY_TIME);
         duploHub.stopMotor();
         delay(DELAY_TIME); // Stop the motor immediately
+        lastSpeed = 0;     // a later BLUE tile must not restart the train
         rotaryEncoder.setEncoderValue(0);
+        encoderValuePending.store(false);
         break;
 
     case DuploEnums::DuploColor::GREEN:
@@ -498,6 +532,8 @@ static void detectedColorCb(DuploEnums::DuploColor color)
         delay(DELAY_TIME);
         duploHub.setMotorSpeed(reverseSpeed);
         lastSpeed = reverseSpeed;
+        rotaryEncoder.setEncoderValue(-reverseSpeed); // keep knob in sync (encoder = -speed)
+        encoderValuePending.store(false);
         delay(DELAY_TIME);
         break;
     }
@@ -583,7 +619,23 @@ static void detectedSpeedCb(int speed)
 String duploHubAddress = "";
 
 /**
- * @brief Perform post-connection initialization after the hub is connected.
+ * @brief Connection callbacks; run in the BLE task on core 0.
+ *
+ * They only flag the event. The actual handling runs in the main loop so that UI state and the
+ * status LED are never touched from two cores at once.
+ */
+static void onHubConnectedFromBleTask()
+{
+    hubConnectedEventPending.store(true);
+}
+
+static void onHubDisconnectedFromBleTask()
+{
+    hubDisconnectedEventPending.store(true);
+}
+
+/**
+ * @brief Arm the post-connection initialization after the hub is connected (main loop).
  *
  * Activates all required hub peripherals, refreshes the activity timer, and
  * restores the controller feedback state for normal operation.
@@ -614,8 +666,33 @@ static void onHubDisconnected()
     hubInitializationStep = HubInitializationStep::Idle;
     hubInitializationStepStartedMs = 0;
     readyHeartbeatActive = false;
+    detectedVoltage = 0.0f; // no valid reading until the next connection reports one
+    // Replay only advances while connected; end it so it cannot keep the controller awake.
+    if (replay)
+    {
+        duploHub.stopReplay();
+        replay = false;
+    }
     statusLed.setColor(CRGB::White);
     statusLed.setBlinking(true, 200, 300, 3);
+}
+
+/**
+ * @brief Handle connection events flagged by the BLE task (main loop).
+ *
+ * Disconnect is handled first; a pending connect is only acted upon if the hub is still
+ * connected, so a quick connect/disconnect or disconnect/reconnect sequence ends in the right state.
+ */
+static void processHubConnectionEvents()
+{
+    if (hubDisconnectedEventPending.exchange(false))
+    {
+        onHubDisconnected();
+    }
+    if (hubConnectedEventPending.exchange(false) && duploHub.isConnected())
+    {
+        onHubConnected();
+    }
 }
 
 /**
@@ -746,9 +823,13 @@ void replayNextCommand()
         {
         case CMD_MOTOR_SPEED:
             duploHub.setMotorSpeed(cmd->data.motor.speed);
+            lastSpeed = cmd->data.motor.speed;
+            rotaryEncoder.setEncoderValue(-lastSpeed);
             break;
         case CMD_STOP_MOTOR:
             duploHub.stopMotor();
+            lastSpeed = 0;
+            rotaryEncoder.setEncoderValue(0);
             break;
         case CMD_SET_LED_COLOR:
             duploHub.setLedColor(cmd->data.led.color);
@@ -848,7 +929,7 @@ void setup()
     rotaryEncoder.setBoundaries(-MAX_SPEED, MAX_SPEED, false);
     rotaryEncoder.setStepValue(SPEED_INC);
     rotaryEncoder.setEncoderValue(0);
-    rotaryEncoder.onTurned(&handleEncoder);
+    rotaryEncoder.onTurned(&onEncoderTurned);
     // This is where the inputs are configured and the interrupts get attached
     rotaryEncoder.begin();
 
@@ -856,9 +937,9 @@ void setup()
     duploHub.init();
     delay(200);
     // Register connection event callbacks
-    duploHub.setOnConnectedCallback(onHubConnected);
+    duploHub.setOnConnectedCallback(onHubConnectedFromBleTask);
     delay(200);
-    duploHub.setOnDisconnectedCallback(onHubDisconnected);
+    duploHub.setOnDisconnectedCallback(onHubDisconnectedFromBleTask);
     delay(200); // Allow time for BLE task to initialize
 
     DEBUG_LOG("TrainController: Ready - BLE task running, waiting for hub connection...");
@@ -890,12 +971,23 @@ static void startWakeupGreenBlink()
 }
 
 /**
+ * @brief Check whether the train battery is known to be low.
+ * @return `true` only if a valid voltage reading exists and it is below the threshold.
+ *
+ * `detectedVoltage == 0` means "no reading yet" (not connected or sensor not reported).
+ */
+static bool isLowVoltage()
+{
+    return hubReady && detectedVoltage > 0.0f && detectedVoltage < LOW_VOLTAGE_THRESHOLD;
+}
+
+/**
  * @brief Check whether the green ready-heartbeat may be displayed.
  * @return `true` when the controller is idle and no warning or mode indicator has priority.
  */
 static bool shouldShowReadyHeartbeat()
 {
-    const bool noLowVoltageWarningPending = (detectedVoltage <= 0.0f) || (detectedVoltage >= LOW_VOLTAGE_THRESHOLD);
+    const bool noLowVoltageWarningPending = !isLowVoltage();
 
     return !wakeBlinkActive &&
            !uploadModeCheckActive &&
@@ -1073,30 +1165,36 @@ static void configureEncoderButtonLightSleepWakeup()
     }
 }
 
+#define STATUS_LOG_INTERVAL_MS 300000UL     // 5 minutes
+#define VOLTAGE_WARNING_INTERVAL_MS 30000UL // 30 seconds
+
 /**
- * @brief Periodically logs the status of the BLE task, hub connection, and CPU temperature.
+ * @brief Periodically logs system status and shows the low-voltage warning.
  * @param duploHub Reference to the DuploHub instance.
  */
 void checkStatus(DuploHub &duploHub)
 {
     static unsigned long lastStatusUpdate = 0;
-    if (millis() - lastStatusUpdate > 300000)
-    { // Every 30 seconds
+    static unsigned long lastVoltageWarning = 0;
+
+    if (millis() - lastStatusUpdate > STATUS_LOG_INTERVAL_MS)
+    {
         DEBUG_LOG("TrainController Status - BLE Task: %s, Hub Connected: %s",
                   duploHub.isBLETaskRunning() ? "Running" : "Stopped",
                   duploHub.isConnected() ? "Yes" : "No");
         float cpuTemp = getCPUTemperature();
         DEBUG_LOG("CPU Temperature: %.2f °C", cpuTemp);
-
-        // Low-voltage indication is suppressed while record/replay owns the status LED.
-        if (detectedVoltage < LOW_VOLTAGE_THRESHOLD && !(recording || replay))
-        {
-            DEBUG_LOG("TrainController: Low voltage detected: %.2f V", detectedVoltage);
-            statusLed.setColor(CRGB::Red);            // Set LED to red for low voltage
-            statusLed.setBlinking(true, 100, 100, 5); // Blink red
-        }
-
         lastStatusUpdate = millis();
+    }
+
+    // Low-voltage indication is suppressed while record/replay/emergency stop own the status LED.
+    if (isLowVoltage() && !(recording || replay || emergencyStop || wakeBlinkActive) &&
+        millis() - lastVoltageWarning > VOLTAGE_WARNING_INTERVAL_MS)
+    {
+        DEBUG_LOG("TrainController: Low voltage detected: %.2f V", detectedVoltage);
+        statusLed.setColor(CRGB::Red);            // Set LED to red for low voltage
+        statusLed.setBlinking(true, 100, 100, 5); // Blink red
+        lastVoltageWarning = millis();
     }
 }
 /**
@@ -1109,6 +1207,26 @@ void checkStatus(DuploHub &duploHub)
 void esp_goto_sleep()
 {
     DEBUG_LOG("TrainController: No user action for %d ms, entering deep sleep...", maxIdleTime);
+
+    // Never leave a moving train behind: end record/replay, stop the motor and close the link.
+    if (replay)
+    {
+        duploHub.stopReplay();
+        replay = false;
+    }
+    if (recording)
+    {
+        duploHub.recordCommands(false);
+        recording = false;
+    }
+    const bool linkShutDown = duploHub.shutdownLinkForSleep(1500);
+    DEBUG_LOG("TrainController: Motor stop + disconnect before sleep %s", linkShutDown ? "confirmed" : "timed out");
+    lastSpeed = 0;
+    rotaryEncoder.setEncoderValue(0);
+    encoderValuePending.store(false);
+    // The BLE task suppresses the disconnect edge while sleeping, so reset the app state here
+    // (matters for the light-sleep fallback, which returns into loop()).
+    onHubDisconnected();
 
     // Re-apply wake configuration right before sleeping in case runtime code changed GPIO routing.
     configureEncoderButtonWakeup(true);
@@ -1130,6 +1248,7 @@ void esp_goto_sleep()
     configureEncoderButtonLightSleepWakeup();
     esp_light_sleep_start();
     DEBUG_LOG("TrainController: Woke from light sleep");
+    duploHub.resumeAfterSleep(); // allow the BLE task to scan and reconnect again
     startWakeupGreenBlink();
     lastUserActionTime = millis();
 }
@@ -1212,13 +1331,23 @@ void loop()
         }
     }
 
+    // A running replay counts as activity, so sleep never cuts it off.
+    if (replay)
+    {
+        lastUserActionTime = millis();
+    }
+
     // Check for idle time to enter deep sleep
     if (lastUserActionTime != 0 && (millis() - lastUserActionTime) > maxIdleTime)
     {
         esp_goto_sleep();
     }
 
+    processHubConnectionEvents();
+
     guiButtons.updateButtons();
+
+    processEncoder();
 
     updateHubInitialization();
 

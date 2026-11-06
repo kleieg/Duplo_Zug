@@ -17,6 +17,7 @@
 #define DUPLO_HUB_H
 
 #include <array>
+#include <atomic>
 #include "myLegoHub.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -37,7 +38,8 @@ enum CommandType
     CMD_PLAY_SOUND,
     CMD_ACTIVATE_COLOR_SENSOR,
     CMD_ACTIVATE_SPEED_SENSOR,
-    CMD_ACTIVATE_VOLTAGE_SENSOR
+    CMD_ACTIVATE_VOLTAGE_SENSOR,
+    CMD_STOP_AND_DISCONNECT ///< Internal: stop the motor and close the BLE link before sleep.
 };
 
 /**
@@ -46,7 +48,7 @@ enum CommandType
 typedef struct
 {
     CommandType type; ///< Kind of command the BLE task shall execute.
-    long timestamp;   ///< Creation timestamp used for record/replay ordering.
+    int64_t timestamp; ///< Creation timestamp (µs, esp_timer) used for record/replay ordering.
     union
     {
         struct
@@ -143,6 +145,10 @@ private:
     int64_t sequenceDuration = 0;       ///< Total replay sequence duration after normalization.
     int replayCycle = 0;                ///< Reserved replay cycle counter for future looped replay modes.
     bool recordCommandsEnabled = false; ///< `true` while outgoing commands are captured for replay.
+
+    // Sleep handshake between the main loop and the BLE task.
+    std::atomic<bool> sleepRequested{false};        ///< `true` suppresses scanning/reconnects before sleep.
+    std::atomic<bool> linkShutdownComplete{false}; ///< Set by the BLE task once stop + disconnect ran.
 
     ConnectionCallback onConnectedCallback;          ///< Application hook for BLE connect events.
     ConnectionCallback onDisconnectedCallback;       ///< Application hook for BLE disconnect events.
@@ -485,6 +491,22 @@ public:
      * @param callback Function to call on voltage detection.
      */
     void setDetectedVoltageCallback(DetectedVoltageCallback callback);
+
+    /**
+     * @brief Stop the motor and close the BLE link before the controller sleeps.
+     *
+     * Drops pending commands, asks the BLE task to stop the motor and disconnect, and suppresses
+     * reconnect scans until `resumeAfterSleep()` is called. Blocks the caller up to `timeoutMs`.
+     *
+     * @param timeoutMs Maximum time to wait for the BLE task to confirm.
+     * @return `true` if the BLE task confirmed stop + disconnect in time.
+     */
+    bool shutdownLinkForSleep(uint32_t timeoutMs);
+
+    /**
+     * @brief Re-enable scanning and reconnects after a sleep that returned (light sleep).
+     */
+    void resumeAfterSleep();
 
     /**
      * @brief Process response queue events in main task.

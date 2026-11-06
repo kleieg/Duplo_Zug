@@ -73,6 +73,27 @@ void myLegoHub::setLedColor(Color color)
 }
 
 
+/**
+ * @brief Actively close the BLE link to the connected hub.
+ *
+ * Legoino does not keep the NimBLE client handle, so it is looked up by the peer address.
+ * The disconnect completes asynchronously; Legoino's client callback clears the connected flag.
+ */
+void myLegoHub::disconnectHub()
+{
+    if (!isConnected() || _pServerAddress == nullptr)
+    {
+        return;
+    }
+
+    NimBLEClient *client = NimBLEDevice::getClientByPeerAddress(*_pServerAddress);
+    if (client != nullptr && client->isConnected())
+    {
+        client->disconnect();
+    }
+}
+
+
 
 
 /**

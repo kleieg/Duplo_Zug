@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- Encoder: fast knob turns no longer get lost; speed commands are still rate-limited (250 ms) but the latest value is always applied, so train speed matches the knob.
+- Encoder: callback (esp_timer task) no longer blocks with `delay()` or touches app state; handling moved to the main loop.
+- Sleep: before entering sleep the controller ends record/replay, stops the motor and actively disconnects the hub; a running replay counts as activity.
+- Color sensor: tile actions are ignored during emergency stop; emergency stop and RED tile reset the last speed so a later BLUE tile cannot restart the train; GREEN syncs the knob to the reversed speed.
+- Hub connect/disconnect callbacks (BLE task, core 0) only set flags; LED and state handling runs in the main loop (no cross-core races on `StatusLED`/FastLED).
+- Low-voltage warning only fires with a valid voltage reading (was triggered by the initial 0 V), is checked every 30 s, and the reading is cleared on disconnect.
+- `HubCommand::timestamp` is now `int64_t` (was a truncated 32-bit `long`).
+
 ### Changed
 
 - Refactored command construction in `DuploHub` to a unified helper path for queue commands.
