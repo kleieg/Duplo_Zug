@@ -21,7 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - Encoder: the dial skips the stop zone below `MIN_SPEED`; the first click from standstill starts the train at +/-`MIN_SPEED`, the next click down stops it (previously the first click did nothing).
 - Encoder: `ENCODER_STEPS_PER_DETENT` 8 → 4; with 8 the dial needed two clicks per speed step (the old comment had the meaning reversed).
-- Buttons: averaging/settling reduced from 10 to 4 samples, so a press registers after ~0.2 s instead of ~0.5 s.
+- Buttons: averaging/settling reduced from 10 to 3 samples, so a press registers after ~0.12-0.15 s instead of ~0.5 s.
 - Status LED bursts showed the last blink for only one loop cycle (~20 ms); bursts now run for N full on/off cycles.
 - PLAY with an empty recording no longer leaves the controller in a stuck "replay" state (buttons locked, no sleep).
 - Fast blue upload-mode blinking no longer continues after the upload window closes.

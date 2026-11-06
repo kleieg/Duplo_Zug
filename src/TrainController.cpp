@@ -152,9 +152,9 @@ static std::atomic<bool> hubConnectedEventPending{false};
 static std::atomic<bool> hubDisconnectedEventPending{false};
 
 // A press is reported after `ADC_BUTTON_SAMPLES` settling samples plus `ADC_BUTTON_SAMPLES`
-// averaged samples, one sample per loop pass (~20 ms): 4 -> ~160-200 ms hold time
+// averaged samples, one sample per loop pass (~20 ms): 3 -> ~120-150 ms hold time
 // (was 10 -> ~0.4-0.5 s). Increase if presses get misdetected while the ladder capacitor settles.
-#define ADC_BUTTON_SAMPLES 4
+#define ADC_BUTTON_SAMPLES 3
 ADCButtons guiButtons = ADCButtons(ADC_PIN, ADC_BUTTON_SAMPLES);
 
 /**
