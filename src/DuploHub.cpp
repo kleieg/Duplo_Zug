@@ -63,6 +63,9 @@ namespace
     constexpr uint32_t COMMAND_PACING_MS = 20;
     // Maximum time the BLE task waits for a new command before doing its housekeeping.
     constexpr uint32_t COMMAND_WAIT_MS = 50;
+    // After connecting, the hub announces its built-in devices one by one. A device must be
+    // announced before it can be activated (Legoino silently ignores unknown ports).
+    constexpr uint32_t DEVICE_ATTACH_TIMEOUT_MS = 2000;
     constexpr uint32_t BLE_TASK_WDT_TIMEOUT_S = 15;    // task watchdog timeout for the BLE task
     constexpr UBaseType_t COMMAND_QUEUE_LENGTH = 10;   // main loop -> BLE task
     constexpr UBaseType_t RESPONSE_QUEUE_LENGTH = 100; // BLE task -> main loop (sensor bursts)
@@ -1119,6 +1122,33 @@ void DuploHub::updateBLE()
 }
 
 /**
+ * @brief Wait until the hub has announced a device on `port` (runs in BLE task).
+ *
+ * Right after connecting, the hub sends one "device attached" message per built-in device.
+ * Legoino's activatePortDevice()/getPortForDeviceType() need that information and silently do
+ * nothing for ports not announced yet, so activation must wait for it.
+ *
+ * @param port Hub port of the device to activate.
+ * @param name Device name for the log message.
+ * @return `true` if the device is known; `false` after timeout or disconnect.
+ */
+bool DuploHub::waitForHubDevice(byte port, const char *name)
+{
+    const unsigned long start = millis();
+    while (hub.getDeviceIndexForPortNumber(port) < 0)
+    {
+        if (!hub.isConnected() || millis() - start >= DEVICE_ATTACH_TIMEOUT_MS)
+        {
+            log_e("Hub device '%s' (port 0x%02x) not announced - not activated", name, port);
+            return false;
+        }
+        esp_task_wdt_reset();
+        delay(20);
+    }
+    return true;
+}
+
+/**
  * @brief Process commands from the command queue (runs in BLE task).
  *
  * Waits up to `firstWait` for the first command, then drains the queue. Every hub write is
@@ -1188,29 +1218,45 @@ void DuploHub::processCommandQueue(TickType_t firstWait)
             hub.playSound((byte)cmd.data.sound.soundId);
             break;
 
+        // Activation needs the device to be announced by the hub first (see waitForHubDevice()).
         case CommandType::CMD_ACTIVATE_RGB_LIGHT:
             DEBUG_LOG("BLE Task: Activating RGB light");
-            hub.activateRgbLight();
+            if (waitForHubDevice((byte)DuploEnums::DuploTrainHubPort::LED, "LED"))
+            {
+                hub.activateRgbLight();
+            }
             break;
 
         case CommandType::CMD_ACTIVATE_BASE_SPEAKER:
             DEBUG_LOG("BLE Task: Activating base speaker");
-            hub.activateBaseSpeaker();
+            if (waitForHubDevice((byte)DuploEnums::DuploTrainHubPort::SPEAKER, "speaker"))
+            {
+                hub.activateBaseSpeaker();
+            }
             break;
 
         case CommandType::CMD_ACTIVATE_COLOR_SENSOR:
             DEBUG_LOG("BLE Task: Activating color sensor");
-            hub.activatePortDevice((byte)DuploEnums::DuploTrainHubPort::COLOR, staticColorSensorCallback);
+            if (waitForHubDevice((byte)DuploEnums::DuploTrainHubPort::COLOR, "color sensor"))
+            {
+                hub.activatePortDevice((byte)DuploEnums::DuploTrainHubPort::COLOR, staticColorSensorCallback);
+            }
             break;
 
         case CommandType::CMD_ACTIVATE_SPEED_SENSOR:
             DEBUG_LOG("BLE Task: Activating speed sensor");
-            hub.activatePortDevice((byte)DuploEnums::DuploTrainHubPort::SPEEDOMETER, staticSpeedSensorCallback);
+            if (waitForHubDevice((byte)DuploEnums::DuploTrainHubPort::SPEEDOMETER, "speed sensor"))
+            {
+                hub.activatePortDevice((byte)DuploEnums::DuploTrainHubPort::SPEEDOMETER, staticSpeedSensorCallback);
+            }
             break;
 
         case CommandType::CMD_ACTIVATE_VOLTAGE_SENSOR:
             DEBUG_LOG("BLE Task: Activating voltage sensor");
-            hub.activatePortDevice((byte)DuploEnums::DuploTrainHubPort::VOLTAGE, staticVoltageSensorCallback);
+            if (waitForHubDevice((byte)DuploEnums::DuploTrainHubPort::VOLTAGE, "voltage sensor"))
+            {
+                hub.activatePortDevice((byte)DuploEnums::DuploTrainHubPort::VOLTAGE, staticVoltageSensorCallback);
+            }
             break;
 
         default:

@@ -178,6 +178,14 @@ private:
     void processCommandQueue(TickType_t firstWait);
 
     /**
+     * @brief Wait until the hub has announced a device on `port` (BLE task, after connect).
+     * @param port Hub port of the device to activate.
+     * @param name Device name for the log message.
+     * @return `true` if the device is known; `false` after timeout or disconnect.
+     */
+    bool waitForHubDevice(byte port, const char *name);
+
+    /**
      * @brief Flush pending commands and responses.
      */
     void clearQueues();
