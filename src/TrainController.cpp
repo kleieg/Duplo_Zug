@@ -79,6 +79,11 @@ ONLY ON ESP32-S3 DEVKITC-1 WITH DUAL CORE
 // BLE name assigned to the connected train hub during initialization.
 #define HUB_NAME "DuploTrain_1"
 
+// Color tile reactions (sound, LED, stop/reverse) by the controller.
+// 1 = enabled (normal). 0 = detected colors are only logged and nothing is sent to the train,
+// e.g. to observe what the hub does on its own while connected.
+#define TILE_ACTIONS 1
+
 // Pin declaration
 // All buttons are wired through a resistor ladder to ADC pin 7 and decoded by voltage level.
 // Current calibration (12-bit ADC values) for the GUI button helpers:
@@ -537,6 +542,13 @@ static void processEncoder()
 static void detectedColorCb(DuploEnums::DuploColor color)
 {
     static bool whiteLightEnabled = false;
+
+#if !TILE_ACTIONS
+    // Tile actions disabled: only log, send nothing to the train (see TILE_ACTIONS).
+    DEBUG_LOG("TrainController: Detected Color: %d (tile actions disabled)", color);
+    detectedColor = color;
+    return;
+#endif
 
     if (replay || recording)
     {
