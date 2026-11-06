@@ -43,6 +43,7 @@
 #include "LegoinoCommon.h"
 #include "esp_timer.h"
 #include "esp_err.h"
+#include "esp_task_wdt.h"
 
 //  #define DEBUG // Enable debug logging
 #undef DEBUG // Enable debug logging
@@ -54,6 +55,7 @@ DuploHub *DuploHub::instance = nullptr;
 namespace
 {
     constexpr uint64_t COLOR_SETTLE_DELAY_US = 250000; // 250 ms debounce window
+    constexpr uint32_t BLE_TASK_WDT_TIMEOUT_S = 15;    // task watchdog timeout for the BLE task
 
     /**
      * @brief Build a timestamped command object for the BLE worker queue.
@@ -1049,8 +1051,23 @@ void DuploHub::bleTaskFunction()
     unsigned long lastConnectionCheck = 0;
     const unsigned long CONNECTION_CHECK_INTERVAL = 1000; // Check connection every 1 second
 
+    // Supervise this task with the ESP task watchdog: if it hangs (e.g. stuck in a BLE call),
+    // the chip resets instead of staying "connected" but unresponsive. The SDK default of 5 s
+    // is too tight because a connect attempt alone may block for 5 s plus service discovery.
+    esp_err_t wdtErr = esp_task_wdt_init(BLE_TASK_WDT_TIMEOUT_S, true);
+    if (wdtErr == ESP_OK)
+    {
+        wdtErr = esp_task_wdt_add(nullptr);
+    }
+    if (wdtErr != ESP_OK)
+    {
+        DEBUG_LOG("WARNING: BLE task watchdog not active (err=%d)", wdtErr);
+    }
+
     while (true)
     {
+        esp_task_wdt_reset();
+
         unsigned long currentTime = millis();
 
         // Handle BLE operations at regular intervals

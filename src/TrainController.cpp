@@ -70,6 +70,7 @@ ONLY ON ESP32-S3 DEVKITC-1 WITH DUAL CORE
 #include "driver/rtc_io.h"
 #include "driver/gpio.h"
 #include "esp_sleep.h"
+#include "esp_system.h"
 
 #include <ESP32RotaryEncoder.h>
 
@@ -885,6 +886,8 @@ void setup()
     {
         const esp_sleep_wakeup_cause_t wakeupCause = esp_sleep_get_wakeup_cause();
         DEBUG_LOG("TrainController: Wakeup cause=%d (%s)", (int)wakeupCause, wakeupCauseToString(wakeupCause));
+        // ESP_RST_TASK_WDT (6) indicates the BLE task watchdog reset the controller.
+        DEBUG_LOG("TrainController: Reset reason=%d", (int)esp_reset_reason());
     }
 
     DEBUG_LOG("TrainController: ENCODER_BTN GPIO=%d, RTC-wake-capable=%s", ENCODER_BTN, encoderButtonIsRtcWakeCapable() ? "yes" : "no");

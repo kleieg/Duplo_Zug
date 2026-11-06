@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- BLE task is supervised by the ESP task watchdog (15 s, reset on timeout): a hung BLE task now resets the controller instead of leaving it connected but unresponsive. Boot log shows the reset reason (`6` = task watchdog).
+
 ### Fixed
 
 - Encoder: fast knob turns no longer get lost; speed commands are still rate-limited (250 ms) but the latest value is always applied, so train speed matches the knob.
