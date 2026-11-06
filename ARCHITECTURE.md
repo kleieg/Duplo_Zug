@@ -27,7 +27,7 @@ The implementation emphasizes low perceived latency:
 
 ### Queue model
 
-- `commandQueue` (10 entries): main loop to BLE task; the BLE task waits on it (no polling), so a command goes out immediately; every command is followed by a 200 ms pause, because the DUPLO hub silently drops commands that arrive closer together (the BLE stack accepts them, only spacing helps); tile handlers send the motor command first, so only the following sound/LED wait; a write the BLE stack rejects (no free buffer) is retried in `Lpf2Hub::WriteValue()` instead of being lost
+- `commandQueue` (10 entries): main loop to BLE task; the BLE task waits on it (no polling), so a command goes out immediately; the DUPLO hub silently drops commands that arrive while it is still busy, so after each command the BLE task waits for the hub's acknowledgement for that port (Port Output Command Feedback 0x82, or Port Input Format 0x47 after a port setup; typically 40-110 ms, timeout 250 ms) and sends a discarded command once more; commands without acknowledgement (hub name) use a fixed 200 ms; tile handlers send the motor command first; a write the BLE stack rejects (no free buffer) is retried in `Lpf2Hub::WriteValue()` instead of being lost
 - `responseQueue` (100 entries): BLE task to main loop (sensor events)
 
 ### Shared synchronization

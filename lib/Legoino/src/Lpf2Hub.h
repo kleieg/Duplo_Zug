@@ -20,6 +20,11 @@ using namespace std::placeholders;
 
 typedef void (*HubPropertyChangeCallback)(void *hub, HubPropertyReference hubProperty, uint8_t *pData);
 typedef void (*PortValueChangeCallback)(void *hub, byte portNumber, DeviceType deviceType, uint8_t *pData);
+// Project-local addition: hub acknowledgement of a command. `inputFormat` = true for a
+// Port Input Format confirmation (0x47, after a port setup), false for a Port Output Command
+// Feedback (0x82, `status` = feedback bits: 0x01 in progress, 0x02 completed, 0x04 discarded,
+// 0x08 idle, 0x10 busy/full).
+typedef void (*PortAckCallback)(byte portNumber, byte status, bool inputFormat);
 
 struct Device
 {
@@ -132,9 +137,13 @@ public:
   boolean _isConnecting;
   boolean _isConnected;
 
+  // Project-local addition: receive hub acknowledgements (0x82 / 0x47), see PortAckCallback.
+  void setPortAckCallback(PortAckCallback callback) { _portAckCallback = callback; }
+
 private:
   // Notification callbacks
   HubPropertyChangeCallback _hubPropertyChangeCallback = nullptr;
+  PortAckCallback _portAckCallback = nullptr;
 
   // List of connected devices
   Device connectedDevices[13];

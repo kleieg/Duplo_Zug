@@ -185,6 +185,40 @@ private:
      */
     bool waitForHubDevice(byte port, const char *name);
 
+    // Command acknowledgement handshake (hub feedback 0x82 / port setup confirmation 0x47).
+    SemaphoreHandle_t ackSemaphore = nullptr;      ///< given when the expected acknowledgement arrives
+    std::atomic<int> expectedAckPort{-1};          ///< port whose acknowledgement is awaited (-1 = none)
+    std::atomic<bool> expectInputFormatAck{false}; ///< awaiting a port setup confirmation (0x47)
+    std::atomic<uint8_t> lastAckStatus{0};         ///< feedback bits of the received acknowledgement
+
+    /**
+     * @brief Hub acknowledgement hook (NimBLE host task): wakes the BLE task if it is the awaited one.
+     */
+    static void staticPortAckCallback(byte port, byte status, bool inputFormat);
+
+    /**
+     * @brief Wait for the hub to acknowledge the command just sent on `port` (BLE task).
+     * @param port Hub port the command was sent to.
+     * @param inputFormat `true` for a port setup (0x41 -> 0x47), `false` for an output command (0x81 -> 0x82).
+     * @param status Receives the feedback bits (output commands).
+     * @return `true` if acknowledged within the timeout.
+     */
+    bool waitForAck(byte port, bool inputFormat, uint8_t &status);
+
+    /**
+     * @brief Acknowledgement expected after executing a command (see executeCommand()).
+     */
+    struct AckExpectation
+    {
+        int port;         ///< -1 = the command produces no acknowledgement
+        bool inputFormat; ///< port setup confirmation instead of output command feedback
+    };
+
+    /**
+     * @brief Send one command to the hub (BLE task) and report which acknowledgement to await.
+     */
+    AckExpectation executeCommand(const HubCommand &cmd);
+
     /**
      * @brief Flush pending commands and responses.
      */

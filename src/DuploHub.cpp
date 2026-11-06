@@ -58,12 +58,15 @@ namespace
     // registered at full speed (was 250 ms: tiles were missed and reactions came too late);
     // increase if reflective surfaces cause false tile detections.
     constexpr uint64_t COLOR_SETTLE_DELAY_US = 80000; // 80 ms debounce window
-    // Pause after each command sent to the hub. The DUPLO hub silently drops a command that
-    // arrives too soon after the previous one (seen on hardware with 20 ms: random loss of
-    // stop/sound/LED commands and of sensor activations). The BLE stack accepts these writes, so
-    // only spacing helps. Tile handlers send the urgent motor command first, so this delays only
-    // the following sound/LED commands, not the reaction.
+    // The DUPLO hub silently drops a command that arrives while it is still processing the
+    // previous one (seen on hardware with 20 ms spacing: random loss of stop/sound/LED commands
+    // and sensor activations). Normally the BLE task waits for the hub's acknowledgement
+    // (see processCommandQueue()); this fixed pause only applies to commands the hub never
+    // acknowledges (hub name) and to unknown/skipped commands.
     constexpr uint32_t COMMAND_PACING_MS = 200;
+    // Maximum wait for the hub's acknowledgement of a command (observed: 40-110 ms). After the
+    // timeout the BLE task continues, so it is never slower than the fixed pacing.
+    constexpr uint32_t ACK_TIMEOUT_MS = 250;
     // Maximum time the BLE task waits for a new command before doing its housekeeping.
     constexpr uint32_t COMMAND_WAIT_MS = 50;
     // After connecting, the hub announces its built-in devices one by one. A device must be
@@ -173,6 +176,12 @@ void DuploHub::initFreeRTOS()
     }
 
     // Create command queue for thread-safe communication
+    ackSemaphore = xSemaphoreCreateBinary();
+    if (ackSemaphore == nullptr)
+    {
+        DEBUG_LOG("ERROR: Failed to create acknowledgement semaphore");
+    }
+
     commandQueue = xQueueCreate(COMMAND_QUEUE_LENGTH, sizeof(HubCommand));
     if (commandQueue == nullptr)
     {
@@ -203,6 +212,12 @@ void DuploHub::cleanupFreeRTOS()
     {
         vSemaphoreDelete(connectionMutex);
         connectionMutex = nullptr;
+    }
+
+    if (ackSemaphore != nullptr)
+    {
+        vSemaphoreDelete(ackSemaphore);
+        ackSemaphore = nullptr;
     }
 
     // Delete command queue
@@ -968,6 +983,9 @@ void DuploHub::bleTaskFunction()
 {
     DEBUG_LOG("BLE Task: Started successfully");
 
+    // Hub acknowledgements (0x82 / 0x47) drive the command pacing, see processCommandQueue().
+    hub.setPortAckCallback(staticPortAckCallback);
+
     unsigned long lastConnectionCheck = 0;
     const unsigned long CONNECTION_CHECK_INTERVAL = 1000; // Check connection every 1 second
 
@@ -1152,11 +1170,146 @@ bool DuploHub::waitForHubDevice(byte port, const char *name)
 }
 
 /**
+ * @brief Hub acknowledgement hook (runs in the NimBLE host task).
+ *
+ * Only the acknowledgement the BLE task is currently waiting for is passed on; everything else
+ * (late or unrelated feedback) is ignored.
+ */
+void DuploHub::staticPortAckCallback(byte port, byte status, bool inputFormat)
+{
+    if (instance == nullptr || instance->ackSemaphore == nullptr)
+    {
+        return;
+    }
+    if (instance->expectedAckPort.load() != (int)port || instance->expectInputFormatAck.load() != inputFormat)
+    {
+        return;
+    }
+    instance->lastAckStatus.store(status);
+    instance->expectedAckPort.store(-1);
+    xSemaphoreGive(instance->ackSemaphore);
+}
+
+/**
+ * @brief Wait for the hub to acknowledge the command just sent on `port` (BLE task).
+ *
+ * Called right after the write: the hub needs at least ~40 ms to answer, so the expectation is
+ * always registered before the acknowledgement can arrive.
+ */
+bool DuploHub::waitForAck(byte port, bool inputFormat, uint8_t &status)
+{
+    status = 0;
+    if (ackSemaphore == nullptr)
+    {
+        delay(COMMAND_PACING_MS); // no handshake possible: fall back to fixed pacing
+        return true;
+    }
+
+    xSemaphoreTake(ackSemaphore, 0); // drop a stale acknowledgement
+    lastAckStatus.store(0);
+    expectInputFormatAck.store(inputFormat);
+    expectedAckPort.store(port);
+
+    const bool acknowledged = (xSemaphoreTake(ackSemaphore, pdMS_TO_TICKS(ACK_TIMEOUT_MS)) == pdTRUE);
+    expectedAckPort.store(-1);
+    status = lastAckStatus.load();
+    return acknowledged;
+}
+
+/**
+ * @brief Send one command to the hub (BLE task) and report which acknowledgement to await.
+ */
+DuploHub::AckExpectation DuploHub::executeCommand(const HubCommand &cmd)
+{
+    const AckExpectation none = {-1, false};
+
+    switch (cmd.type)
+    {
+    case CommandType::CMD_MOTOR_SPEED:
+        DEBUG_LOG("BLE Task: Setting motor speed to %d", cmd.data.motor.speed);
+        hub.setBasicMotorSpeed((byte)DuploEnums::DuploTrainHubPort::MOTOR, cmd.data.motor.speed);
+        return {(int)DuploEnums::DuploTrainHubPort::MOTOR, false};
+
+    case CommandType::CMD_STOP_MOTOR:
+        DEBUG_LOG("BLE Task: Stopping motor");
+        hub.stopBasicMotor((byte)DuploEnums::DuploTrainHubPort::MOTOR);
+        return {(int)DuploEnums::DuploTrainHubPort::MOTOR, false};
+
+    case CommandType::CMD_SET_LED_COLOR:
+        DEBUG_LOG("BLE Task: Setting LED color to %d", cmd.data.led.color);
+        hub.setLedColor((Color)cmd.data.led.color);
+        return {(int)DuploEnums::DuploTrainHubPort::LED, false};
+
+    case CommandType::CMD_PLAY_SOUND:
+        DEBUG_LOG("BLE Task: Playing sound with ID %d", cmd.data.sound.soundId);
+        hub.playSound((byte)cmd.data.sound.soundId);
+        return {(int)DuploEnums::DuploTrainHubPort::SPEAKER, false};
+
+    case CommandType::CMD_SET_HUB_NAME:
+        // Hub property write: the hub sends no acknowledgement -> fixed pacing.
+        DEBUG_LOG("BLE Task: Setting hub name to %s", cmd.data.hubName.name);
+        hub.setHubName(cmd.data.hubName.name);
+        return none;
+
+    // Activations need the device to be announced by the hub first (see waitForHubDevice()).
+    case CommandType::CMD_ACTIVATE_RGB_LIGHT:
+        DEBUG_LOG("BLE Task: Activating RGB light");
+        if (!waitForHubDevice((byte)DuploEnums::DuploTrainHubPort::LED, "LED"))
+            return none;
+        hub.activateRgbLight();
+        return {(int)DuploEnums::DuploTrainHubPort::LED, true};
+
+    case CommandType::CMD_ACTIVATE_BASE_SPEAKER:
+    {
+        DEBUG_LOG("BLE Task: Activating base speaker");
+        if (!waitForHubDevice((byte)DuploEnums::DuploTrainHubPort::SPEAKER, "speaker"))
+            return none;
+        // Two port setups on the same port: confirm the first before sending the second.
+        hub.activateSpeakerPort();
+        uint8_t status = 0;
+        if (!waitForAck((byte)DuploEnums::DuploTrainHubPort::SPEAKER, true, status))
+        {
+            log_e("Hub did not confirm speaker port setup within %u ms", (unsigned)ACK_TIMEOUT_MS);
+        }
+        hub.setSpeakerSoundMode();
+        return {(int)DuploEnums::DuploTrainHubPort::SPEAKER, true};
+    }
+
+    case CommandType::CMD_ACTIVATE_COLOR_SENSOR:
+        DEBUG_LOG("BLE Task: Activating color sensor");
+        if (!waitForHubDevice((byte)DuploEnums::DuploTrainHubPort::COLOR, "color sensor"))
+            return none;
+        hub.activatePortDevice((byte)DuploEnums::DuploTrainHubPort::COLOR, staticColorSensorCallback);
+        return {(int)DuploEnums::DuploTrainHubPort::COLOR, true};
+
+    case CommandType::CMD_ACTIVATE_SPEED_SENSOR:
+        DEBUG_LOG("BLE Task: Activating speed sensor");
+        if (!waitForHubDevice((byte)DuploEnums::DuploTrainHubPort::SPEEDOMETER, "speed sensor"))
+            return none;
+        hub.activatePortDevice((byte)DuploEnums::DuploTrainHubPort::SPEEDOMETER, staticSpeedSensorCallback);
+        return {(int)DuploEnums::DuploTrainHubPort::SPEEDOMETER, true};
+
+    case CommandType::CMD_ACTIVATE_VOLTAGE_SENSOR:
+        DEBUG_LOG("BLE Task: Activating voltage sensor");
+        if (!waitForHubDevice((byte)DuploEnums::DuploTrainHubPort::VOLTAGE, "voltage sensor"))
+            return none;
+        hub.activatePortDevice((byte)DuploEnums::DuploTrainHubPort::VOLTAGE, staticVoltageSensorCallback);
+        return {(int)DuploEnums::DuploTrainHubPort::VOLTAGE, true};
+
+    default:
+        DEBUG_LOG("BLE Task: Unknown command type");
+        return none;
+    }
+}
+
+/**
  * @brief Process commands from the command queue (runs in BLE task).
  *
- * Waits up to `firstWait` for the first command, then drains the queue. Every command is
- * followed by the `COMMAND_PACING_MS` pause the hub needs; writes the BLE stack rejects are
- * retried inside `Lpf2Hub::WriteValue()`.
+ * Waits up to `firstWait` for the first command, then drains the queue. After each command the
+ * task waits for the hub's acknowledgement for that port (typically 40-110 ms) before sending the
+ * next one; the hub silently drops commands that arrive while it is still busy. A command the hub
+ * reports as discarded is sent once more. Without acknowledgement (timeout, or commands the hub
+ * never acknowledges) the fixed `COMMAND_PACING_MS` applies.
  *
  * @param firstWait Maximum time to block for the first command.
  */
@@ -1179,7 +1332,8 @@ void DuploHub::processCommandQueue(TickType_t firstWait)
             {
                 DEBUG_LOG("BLE Task: Stopping motor and disconnecting before sleep");
                 hub.stopBasicMotor((byte)DuploEnums::DuploTrainHubPort::MOTOR);
-                delay(100); // Let the stop command go out before the link is closed.
+                uint8_t status = 0;
+                waitForAck((byte)DuploEnums::DuploTrainHubPort::MOTOR, false, status); // stop out before closing
                 hub.disconnectHub();
                 delay(100);
             }
@@ -1194,80 +1348,29 @@ void DuploHub::processCommandQueue(TickType_t firstWait)
             continue;
         }
 
-        switch (cmd.type)
+        for (int attempt = 0; attempt < 2; attempt++)
         {
-        case CommandType::CMD_MOTOR_SPEED:
-            DEBUG_LOG("BLE Task: Setting motor speed to %d", cmd.data.motor.speed);
-            hub.setBasicMotorSpeed((byte)DuploEnums::DuploTrainHubPort::MOTOR, cmd.data.motor.speed);
-            break;
-
-        case CommandType::CMD_STOP_MOTOR:
-            DEBUG_LOG("BLE Task: Stopping motor");
-            hub.stopBasicMotor((byte)DuploEnums::DuploTrainHubPort::MOTOR);
-            break;
-
-        case CommandType::CMD_SET_LED_COLOR:
-            DEBUG_LOG("BLE Task: Setting LED color to %d", cmd.data.led.color);
-            hub.setLedColor((Color)cmd.data.led.color);
-            break;
-
-        case CommandType::CMD_SET_HUB_NAME:
-            DEBUG_LOG("BLE Task: Setting hub name to %s", cmd.data.hubName.name);
-            hub.setHubName(cmd.data.hubName.name);
-            break;
-
-        case CommandType::CMD_PLAY_SOUND:
-            DEBUG_LOG("BLE Task: Playing sound with ID %d", cmd.data.sound.soundId);
-            hub.playSound((byte)cmd.data.sound.soundId);
-            break;
-
-        // Activation needs the device to be announced by the hub first (see waitForHubDevice()).
-        case CommandType::CMD_ACTIVATE_RGB_LIGHT:
-            DEBUG_LOG("BLE Task: Activating RGB light");
-            if (waitForHubDevice((byte)DuploEnums::DuploTrainHubPort::LED, "LED"))
+            const AckExpectation ack = executeCommand(cmd);
+            if (ack.port < 0)
             {
-                hub.activateRgbLight();
+                delay(COMMAND_PACING_MS);
+                break;
             }
-            break;
 
-        case CommandType::CMD_ACTIVATE_BASE_SPEAKER:
-            DEBUG_LOG("BLE Task: Activating base speaker");
-            if (waitForHubDevice((byte)DuploEnums::DuploTrainHubPort::SPEAKER, "speaker"))
+            uint8_t status = 0;
+            if (!waitForAck((byte)ack.port, ack.inputFormat, status))
             {
-                hub.activateBaseSpeaker();
+                log_e("Hub did not acknowledge command %d on port 0x%02x within %u ms",
+                      (int)cmd.type, ack.port, (unsigned)ACK_TIMEOUT_MS);
+                break; // already waited the full timeout; continue with the next command
             }
-            break;
-
-        case CommandType::CMD_ACTIVATE_COLOR_SENSOR:
-            DEBUG_LOG("BLE Task: Activating color sensor");
-            if (waitForHubDevice((byte)DuploEnums::DuploTrainHubPort::COLOR, "color sensor"))
+            if (!ack.inputFormat && (status & 0x04))
             {
-                hub.activatePortDevice((byte)DuploEnums::DuploTrainHubPort::COLOR, staticColorSensorCallback);
+                log_e("Hub discarded command %d on port 0x%02x - sending again", (int)cmd.type, ack.port);
+                continue;
             }
-            break;
-
-        case CommandType::CMD_ACTIVATE_SPEED_SENSOR:
-            DEBUG_LOG("BLE Task: Activating speed sensor");
-            if (waitForHubDevice((byte)DuploEnums::DuploTrainHubPort::SPEEDOMETER, "speed sensor"))
-            {
-                hub.activatePortDevice((byte)DuploEnums::DuploTrainHubPort::SPEEDOMETER, staticSpeedSensorCallback);
-            }
-            break;
-
-        case CommandType::CMD_ACTIVATE_VOLTAGE_SENSOR:
-            DEBUG_LOG("BLE Task: Activating voltage sensor");
-            if (waitForHubDevice((byte)DuploEnums::DuploTrainHubPort::VOLTAGE, "voltage sensor"))
-            {
-                hub.activatePortDevice((byte)DuploEnums::DuploTrainHubPort::VOLTAGE, staticVoltageSensorCallback);
-            }
-            break;
-
-        default:
-            DEBUG_LOG("BLE Task: Unknown command type");
             break;
         }
-
-        delay(COMMAND_PACING_MS);
     }
 }
 

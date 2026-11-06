@@ -112,8 +112,11 @@ typedef void (*DetectedVoltageCallback)(float detectedVoltage);
 class myLegoHub : public Lpf2Hub
 {
 public:
-    /** @brief Enable the DUPLO speaker port. */
-    void activateBaseSpeaker();
+    /** @brief Speaker setup step 1: activate the DUPLO speaker port. */
+    void activateSpeakerPort();
+
+    /** @brief Speaker setup step 2: switch the speaker port to sound mode (after step 1 is confirmed). */
+    void setSpeakerSoundMode();
 
     /**
      * @brief Start playback of a DUPLO sound effect.

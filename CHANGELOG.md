@@ -22,6 +22,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - BLE task is supervised by the ESP task watchdog (15 s, reset on timeout): a hung BLE task now resets the controller instead of leaving it connected but unresponsive. Boot log shows the reset reason (`6` = task watchdog).
 
+### Changed
+
+- Command pacing uses the hub's acknowledgements instead of a fixed 200 ms: after each command the BLE task waits for the Port Output Command Feedback (0x82) or Port Input Format confirmation (0x47) for that port (observed 40-110 ms, timeout 250 ms) and resends a command the hub reports as discarded. Legoino forwards these messages via a new `setPortAckCallback()` (project-local change); the speaker setup is split into two confirmed steps. Diagnostic logging `LWP_FEEDBACK_DIAG` in `Lpf2Hub.cpp` is available but off.
+
 ### Fixed
 
 - Tile reactions were random (stop without sound, sound without stop, nothing): the DUPLO hub silently drops commands that arrive within ~20 ms of each other. Command pacing is back to 200 ms for all commands (the motor command is sent first, so the reaction itself is not delayed). Black and non-action colors no longer send train light commands (they flooded the hub on track gaps).

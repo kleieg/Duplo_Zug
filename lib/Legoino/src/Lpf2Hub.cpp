@@ -13,7 +13,7 @@
 // Project-local diagnostics (DUPLO controller): log outgoing commands and the hub's command
 // feedback (0x82) / port input format confirmations (0x47) with timestamps, to evaluate
 // feedback-based command pacing. Logging only, no behavior change. Set to 0 to disable.
-#define LWP_FEEDBACK_DIAG 1
+#define LWP_FEEDBACK_DIAG 0
 
 #if LWP_FEEDBACK_DIAG
 /**
@@ -811,7 +811,17 @@ void Lpf2Hub::parseSensorMessage(uint8_t *pData)
  */
 void Lpf2Hub::parsePortAction(uint8_t *pData)
 {
-    log_d("parsePortAction");
+    // Project-local change: forward Port Output Command Feedback to the application.
+    // Payload: one or more (port, feedback bits) pairs after the 3-byte header; pData[0] = length.
+    if (_portAckCallback == nullptr)
+    {
+        return;
+    }
+    const int length = pData[0];
+    for (int i = 3; i + 1 < length; i += 2)
+    {
+        _portAckCallback(pData[i], pData[i + 1], false);
+    }
 }
 
 /**
@@ -869,6 +879,15 @@ void Lpf2Hub::notifyCallback(
     case (byte)MessageType::PORT_OUTPUT_COMMAND_FEEDBACK:
     {
         parsePortAction(pData);
+        break;
+    }
+    case (byte)MessageType::PORT_INPUT_FORMAT_SINGLE:
+    {
+        // Project-local change: confirmation of a port setup (0x41) -> forward to the application.
+        if (_portAckCallback != nullptr && length > 3)
+        {
+            _portAckCallback(pData[3], 0, true);
+        }
         break;
     }
     }

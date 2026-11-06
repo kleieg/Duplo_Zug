@@ -17,16 +17,21 @@
 
 
 /**
- * @brief Activate the base speaker port device.
- *
- * Activates the DUPLO speaker port and configures the device to accept sound commands.
+ * @brief Activate the speaker port device (first step of the speaker setup).
  */
-void myLegoHub::activateBaseSpeaker()
+void myLegoHub::activateSpeakerPort()
 {
-    // Activate the speaker port device first
     activatePortDevice((byte)DuploTrainHubPort::SPEAKER);
-    delay(100); // Give time for activation
-    // Set sound mode 
+}
+
+/**
+ * @brief Switch the activated speaker port to sound mode (second step of the speaker setup).
+ *
+ * Must follow activateSpeakerPort() only after the hub confirmed that port setup; the hub drops
+ * a port setup that arrives while it is still processing the previous one.
+ */
+void myLegoHub::setSpeakerSoundMode()
+{
     byte setSoundMode[8] = { 0x41, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x01 };
     WriteValue(setSoundMode, 8);
 }
