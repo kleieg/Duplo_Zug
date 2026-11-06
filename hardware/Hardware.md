@@ -34,8 +34,7 @@ DuploTrainController NG/
 ├── DuploTrainController NG.kicad_pcb   # Routed PCB layout
 ├── DuploTrainController NG.kicad_prl   # Project-specific settings and plot config
 ├── DuploTrainController NG.kicad_pcb.zip
-├── DuploTrainController NG-backups/    # Timestamped KiCad backups
-│   └── DuploTrainController NG-*.zip
+├── DuploTrainController NG-backups/    # Local KiCad auto-backups (not in git, see .gitignore)
 ├── 5 Buttons an ADC.xlsx               # Button ladder calculations
 ├── Gerber/
 │   ├── DuploTrainController NG-F_Cu.gbr

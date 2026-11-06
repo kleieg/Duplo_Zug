@@ -22,6 +22,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- `DuploHub`: one `queueCommand()` helper for all commands; replay re-queues the recorded command via `replayCommand()` instead of a duplicated switch in `TrainController`.
+- `TrainController`: removed blocking `delay()` calls from button and color handlers (the BLE task paces hub writes); hub name is the `HUB_NAME` constant; sound button cycle starts with HORN.
+- `ADCButtons`: sampling state is per instance, single `ensureCapacity()` resize routine, sample buffer sized from the validated sample count.
+- `platformio.ini`: shared `[env]` section; serial ports are auto-detected instead of hard-coded.
+- Repository: `.DS_Store`, KiCad auto-backups and `fp-info-cache` are no longer tracked; GitHub Actions builds both environments on every push.
 - Refactored command construction in `DuploHub` to a unified helper path for queue commands.
 - Optimized `StatusLED` updates with a dirty-flag to avoid unnecessary `FastLED.show()` calls.
 - Corrected water-button behavior in `TrainController` (removed unrelated color mutation, fixed log semantics).
