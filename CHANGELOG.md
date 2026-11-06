@@ -43,6 +43,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Removed
 
+- Startup "upload mode" (hold encoder 2 s for a 10 s upload window): uploads work via USB auto-reset while awake; from sleep, wake with the encoder button first.
 - Removed `DuploHub::update()` and `ensureBLETaskRunning()` (uncalled since the July 2025 refactoring; the handle check could never detect a hung or crashed BLE task).
 - Removed unused `wasConnected`, `replayCycle`, `sequenceDuration`, the `DuploHub(byte port)` constructor, `setMotorPort()`/`getMotorPort()` (the motor always uses the DUPLO `MOTOR` port) and the never-implemented `playSoundDirect()` declaration.
 - Removed unreachable, non-thread-safe direct-hub fallbacks for a missing command queue; they now log an error like the other commands.

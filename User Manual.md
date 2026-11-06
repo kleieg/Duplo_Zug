@@ -45,11 +45,11 @@ Short blink bursts are events; after a burst the LED returns to the current mode
 - Wake-up is only possible with the encoder button.
 - The front buttons do not wake the controller.
 
-## 5. Upload Mode
+## 5. Firmware Upload
 
-- During startup, hold the encoder continuously for at least 2 seconds.
-- A 10-second firmware upload window then opens.
-- A short tap does not start upload mode.
+- Upload works while the controller is awake (USB auto-reset, no button needed).
+- In sleep the USB connection is off: press the encoder button to wake the controller, then upload.
+- Recovery if a firmware does not boot: hold the board's BOOT button and press RESET, then upload.
 
 ## 6. Track Color Bricks
 

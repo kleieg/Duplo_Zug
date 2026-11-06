@@ -152,7 +152,7 @@ This prevents the user from issuing commands into a not-yet-initialized hub.
 
 - wake only by encoder button
 - green wake blink acknowledgment
-- startup upload mode requires continuous encoder hold for at least 2 seconds
+- firmware upload needs no button while awake; from sleep, wake with the encoder button first
 
 ## Project-Owned Modules
 

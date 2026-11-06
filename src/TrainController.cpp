@@ -206,10 +206,7 @@ static void updateHubInitialization();
 static bool wakeBlinkActive = false;
 static unsigned long wakeBlinkEndMs = 0;
 
-// Startup and idle LED state bookkeeping.
-static bool uploadModeCheckActive = false;
-static unsigned long uploadModeCheckStartMs = 0;
-static unsigned long encoderBtnHoldStartMs = 0;
+// Idle LED state bookkeeping.
 static bool readyHeartbeatActive = false;
 static unsigned long lastReadyHeartbeatMs = 0;
 
@@ -872,11 +869,6 @@ void setup()
 
     const esp_sleep_wakeup_cause_t wakeCause = esp_sleep_get_wakeup_cause();
 
-    // Upload mode is intentionally hard to trigger so normal wake presses do not stall boot.
-    uploadModeCheckActive = true;
-    uploadModeCheckStartMs = millis();
-    encoderBtnHoldStartMs = 0;
-
     // If we woke from sleep, start green blink 5x as a visual confirmation.
     if (wakeCause == ESP_SLEEP_WAKEUP_EXT0 || wakeCause == ESP_SLEEP_WAKEUP_EXT1 || wakeCause == ESP_SLEEP_WAKEUP_GPIO)
     {
@@ -964,7 +956,6 @@ static bool shouldShowReadyHeartbeat()
     const bool noLowVoltageWarningPending = !isLowVoltage();
 
     return !wakeBlinkActive &&
-           !uploadModeCheckActive &&
            hubReady &&
            !recording &&
            !replay &&
@@ -1328,45 +1319,6 @@ void loop()
     {
         wakeBlinkActive = false;
         statusLed.setOff();
-    }
-
-    // Gate upload mode behind a continuous hold to avoid accidental entry during wakeup handling.
-    if (uploadModeCheckActive)
-    {
-        const unsigned long now = millis();
-        const bool btnLow = (digitalRead(ENCODER_BTN) == LOW);
-
-        if (btnLow)
-        {
-            if (encoderBtnHoldStartMs == 0)
-            {
-                encoderBtnHoldStartMs = now;
-            }
-            else if (now - encoderBtnHoldStartMs >= 2000)
-            {
-                uploadModeCheckActive = false;
-                statusLed.setColor(CRGB::Blue);
-                statusLed.setBlinking(true, 100, 100); // Fast blue blink = upload mode
-                DEBUG_LOG("=== UPLOAD MODE ===");
-                DEBUG_LOG("Ready for firmware upload - waiting 10 seconds...");
-                for (int i = 0; i < 100; i++)
-                {
-                    statusLed.update();
-                    delay(100); // 10 seconds total
-                }
-                DEBUG_LOG("Upload window closed, continuing normal boot...");
-                shownLedMode = LedMode::Unknown; // end the upload blink, show the current mode
-            }
-        }
-        else
-        {
-            encoderBtnHoldStartMs = 0;
-            // After a short startup phase with no long hold, disable check completely.
-            if (now - uploadModeCheckStartMs > 3000)
-            {
-                uploadModeCheckActive = false;
-            }
-        }
     }
 
     // Periodic idle countdown log for debugging sleep timing.
