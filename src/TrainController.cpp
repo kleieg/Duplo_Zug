@@ -160,6 +160,21 @@ ADCButtons guiButtons = ADCButtons(ADC_PIN, ADC_BUTTON_SAMPLES);
 static void configureEncoderButtonWakeup(bool enableHold);
 
 /**
+ * @brief Configure the encoder button as a normal digital input for runtime use.
+ *
+ * The RTC wake configuration is only applied right before sleeping (see `esp_goto_sleep()`).
+ */
+static void configureEncoderButtonRuntime();
+
+// Dial (encoder) button: press = normal stop, hold = sleep now, press while asleep = wake.
+#define ENCODER_BTN_DEBOUNCE_MS 30
+#define ENCODER_BTN_HOLD_TO_SLEEP_MS 2000
+
+// The press that woke the controller is ignored until it is released, so it neither stops
+// nor (if held a bit longer) immediately puts the controller back to sleep.
+static bool encoderBtnIgnoreUntilRelease = false;
+
+/**
  * @brief Convert an ESP sleep wake reason into a readable string.
  * @param cause Wakeup reason reported by the ESP-IDF sleep subsystem.
  * @return Static string representation of the wake cause.
@@ -861,7 +876,8 @@ void setup()
     DEBUG_LOG("TrainController: ENCODER_BTN GPIO=%d, RTC-wake-capable=%s", ENCODER_BTN, encoderButtonIsRtcWakeCapable() ? "yes" : "no");
 #endif
 
-    configureEncoderButtonWakeup(false);
+    configureEncoderButtonRuntime();
+    encoderBtnIgnoreUntilRelease = (digitalRead(ENCODER_BTN) == LOW); // still held after wake
 
     // Initialize onboard RGB LED
     statusLed.begin();            // Initialize FastLED,,,,z
@@ -1211,6 +1227,20 @@ static void configureEncoderButtonLightSleepWakeup()
     }
 }
 
+/**
+ * @brief Configure the encoder button as a normal digital input for runtime use.
+ */
+static void configureEncoderButtonRuntime()
+{
+    const gpio_num_t pin = (gpio_num_t)ENCODER_BTN;
+    if (rtc_gpio_is_valid_gpio(pin))
+    {
+        rtc_gpio_hold_dis(pin);
+        rtc_gpio_deinit(pin); // hand the pad back to the digital GPIO matrix so digitalRead() works
+    }
+    pinMode(ENCODER_BTN, INPUT_PULLUP);
+}
+
 #define STATUS_LOG_INTERVAL_MS 300000UL     // 5 minutes
 #define VOLTAGE_WARNING_INTERVAL_MS 30000UL // 30 seconds
 
@@ -1252,7 +1282,7 @@ void checkStatus(DuploHub &duploHub)
  */
 void esp_goto_sleep()
 {
-    DEBUG_LOG("TrainController: No user action for %d ms, entering deep sleep...", maxIdleTime);
+    DEBUG_LOG("TrainController: Entering sleep (idle timeout %d ms or dial held)", maxIdleTime);
 
     // Never leave a moving train behind: end record/replay, stop the motor and close the link.
     if (replay)
@@ -1294,9 +1324,102 @@ void esp_goto_sleep()
     configureEncoderButtonLightSleepWakeup();
     esp_light_sleep_start();
     DEBUG_LOG("TrainController: Woke from light sleep");
-    duploHub.resumeAfterSleep(); // allow the BLE task to scan and reconnect again
+    configureEncoderButtonRuntime();
+    encoderBtnIgnoreUntilRelease = true; // the wake press must not stop or re-trigger sleep
+    duploHub.resumeAfterSleep();         // allow the BLE task to scan and reconnect again
     startWakeupGreenBlink();
     lastUserActionTime = millis();
+}
+
+/**
+ * @brief Normal (non-latching) stop from the dial button.
+ *
+ * Stops the motor, ends a running replay and re-centers the knob. Unlike the emergency stop
+ * nothing is locked: turning the dial drives again. Ignored while not ready or during
+ * emergency stop (the train is already stopped then).
+ */
+static void normalStop()
+{
+    if (!hubReady || emergencyStop)
+    {
+        return;
+    }
+    if (replay)
+    {
+        duploHub.stopReplay();
+        replay = false;
+    }
+    duploHub.stopMotor();
+    lastSpeed = 0;
+    rotaryEncoder.setEncoderValue(0);
+    encoderValuePending.store(false);
+    DEBUG_LOG("TrainController: Dial pressed - normal stop");
+}
+
+/**
+ * @brief Handle the dial (encoder) button: press = normal stop, hold = sleep now.
+ *
+ * The stop happens immediately on press. Sleep is armed after `ENCODER_BTN_HOLD_TO_SLEEP_MS`
+ * (fast red blinking as feedback) and entered on release; sleeping while the button is still
+ * held would wake the controller again right away (wake is LOW-level triggered).
+ */
+static void processEncoderButton()
+{
+    static bool rawPressed = false;
+    static unsigned long rawChangedMs = 0;
+    static bool pressed = false;
+    static unsigned long pressStartMs = 0;
+    static bool sleepArmed = false;
+
+    const unsigned long now = millis();
+    const bool raw = (digitalRead(ENCODER_BTN) == LOW);
+    if (raw != rawPressed)
+    {
+        rawPressed = raw;
+        rawChangedMs = now;
+    }
+    if (now - rawChangedMs < ENCODER_BTN_DEBOUNCE_MS)
+    {
+        return; // level not stable yet
+    }
+
+    if (raw == pressed)
+    {
+        // No edge: check whether a held press reached the sleep threshold.
+        if (pressed && !sleepArmed && !encoderBtnIgnoreUntilRelease &&
+            now - pressStartMs >= ENCODER_BTN_HOLD_TO_SLEEP_MS)
+        {
+            sleepArmed = true;
+            statusLed.setColor(CRGB::Red);
+            statusLed.setBlinking(true, 80, 80, 125); // fast red until released (max ~20 s)
+            DEBUG_LOG("TrainController: Dial held - sleep on release");
+        }
+        return;
+    }
+
+    pressed = raw;
+    if (pressed)
+    {
+        pressStartMs = now;
+        lastUserActionTime = now;
+        if (!encoderBtnIgnoreUntilRelease)
+        {
+            normalStop();
+        }
+        return;
+    }
+
+    // Released
+    if (encoderBtnIgnoreUntilRelease)
+    {
+        encoderBtnIgnoreUntilRelease = false;
+        return;
+    }
+    if (sleepArmed)
+    {
+        sleepArmed = false;
+        esp_goto_sleep();
+    }
 }
 
 // main loop
@@ -1355,6 +1478,8 @@ void loop()
     guiButtons.updateButtons();
 
     processEncoder();
+
+    processEncoderButton();
 
     updateHubInitialization();
 

@@ -89,7 +89,8 @@ Important: Green now explicitly means not just "connected" but "ready for comman
 ## Controls
 
 - Rotate encoder: set speed reverse, stop, forward
-- Short encoder press: wake from sleep
+- Press encoder: normal stop; in sleep: wake
+- Hold encoder 2 s, release: sleep now
 - Hold encoder during startup >= 2 s: open 10-second upload window
 - REC: start/stop recording
 - PLAY: play the latest recording once

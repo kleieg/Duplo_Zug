@@ -150,7 +150,7 @@ This prevents the user from issuing commands into a not-yet-initialized hub.
 
 ### Wake
 
-- wake only by encoder button
+- wake only by encoder button; while awake: press = normal stop, hold 2 s + release = sleep now
 - green wake blink acknowledgment
 - firmware upload needs no button while awake; from sleep, wake with the encoder button first
 

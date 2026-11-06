@@ -28,8 +28,9 @@ Short blink bursts are events; after a burst the LED returns to the current mode
 
 ## 3. Controls
 
-- Rotate encoder: set reverse or forward speed
-- Short encoder press: wake controller from sleep
+- Rotate encoder: set reverse or forward speed (first click from standstill starts at the minimum speed)
+- Press encoder: stop the train (normal stop, nothing locked; also ends a playback). In sleep: wake the controller
+- Hold encoder 2 s: LED blinks red fast, release to put the controller to sleep right away
 - STOP: emergency stop on/off; active recording or playback is stopped first
 - REC: start or stop recording (ignored during emergency stop)
 - PLAY: play the latest recording once (ignored during emergency stop)
@@ -41,6 +42,8 @@ Short blink bursts are events; after a burst the LED returns to the current mode
 ## 4. Sleep And Wake
 
 - After 5 minutes without input, the controller enters sleep mode.
+- Sleep now: hold the encoder for 2 seconds until the LED blinks red fast, then release.
+- Before sleeping, the train is stopped and disconnected.
 - In sleep, the LED is off.
 - Wake-up is only possible with the encoder button.
 - The front buttons do not wake the controller.

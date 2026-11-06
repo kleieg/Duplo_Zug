@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- Dial (encoder) button while awake: press = normal stop (immediate, nothing locked, also ends a replay; STOP stays the latching emergency stop), hold 2 s = fast red blinking, sleep on release. The press that wakes the controller is ignored until released.
+- Encoder button pin is now a plain digital input at runtime; the RTC wake configuration is applied only right before sleeping.
+
 - BLE task is supervised by the ESP task watchdog (15 s, reset on timeout): a hung BLE task now resets the controller instead of leaving it connected but unresponsive. Boot log shows the reset reason (`6` = task watchdog).
 
 ### Fixed
