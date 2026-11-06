@@ -56,6 +56,8 @@ namespace
 {
     constexpr uint64_t COLOR_SETTLE_DELAY_US = 250000; // 250 ms debounce window
     constexpr uint32_t BLE_TASK_WDT_TIMEOUT_S = 15;    // task watchdog timeout for the BLE task
+    constexpr UBaseType_t COMMAND_QUEUE_LENGTH = 10;   // main loop -> BLE task
+    constexpr UBaseType_t RESPONSE_QUEUE_LENGTH = 100; // BLE task -> main loop (sensor bursts)
 
     /**
      * @brief Build a timestamped command object for the BLE worker queue.
@@ -157,13 +159,13 @@ void DuploHub::initFreeRTOS()
     }
 
     // Create command queue for thread-safe communication
-    commandQueue = xQueueCreate(10, sizeof(HubCommand)); // Queue size: 10 commands
+    commandQueue = xQueueCreate(COMMAND_QUEUE_LENGTH, sizeof(HubCommand));
     if (commandQueue == nullptr)
     {
         DEBUG_LOG("ERROR: Failed to create command queue");
     }
 
-    responseQueue = xQueueCreate(100, sizeof(HubResponse)); // Queue size: 10 response entries
+    responseQueue = xQueueCreate(RESPONSE_QUEUE_LENGTH, sizeof(HubResponse));
     if (responseQueue == nullptr)
     {
         DEBUG_LOG("ERROR: Failed to create response queue");
@@ -478,26 +480,43 @@ BaseType_t DuploHub::sendCommand(const HubCommand &cmd, TickType_t timeout)
 }
 
 /**
+ * @brief Queue a command for the BLE task, logging failures (thread-safe).
+ * @param cmd Command to queue (recorded for replay while recording is enabled).
+ * @param what Short description used in log messages.
+ */
+void DuploHub::queueCommand(const HubCommand &cmd, const char *what)
+{
+    if (commandQueue == nullptr)
+    {
+        DEBUG_LOG("ERROR: Command queue is not initialized - cannot %s", what);
+        return;
+    }
+
+    if (sendCommand(cmd, pdMS_TO_TICKS(100)) != pdTRUE)
+    {
+        DEBUG_LOG("WARNING: Failed to queue %s command", what);
+    }
+}
+
+/**
+ * @brief Queue a previously recorded command again (used by replay).
+ * @param cmd Recorded command to execute.
+ */
+void DuploHub::replayCommand(const HubCommand &cmd)
+{
+    queueCommand(cmd, "replay");
+}
+
+/**
  * @brief Set the hub's name (thread-safe).
  * @param name The new name for the hub.
  */
 void DuploHub::setHubName(const char *name)
 {
-    if (commandQueue != nullptr)
-    {
-        HubCommand cmd = createHubCommand(CommandType::CMD_SET_HUB_NAME);
-        strncpy(cmd.data.hubName.name, name, sizeof(cmd.data.hubName.name) - 1);
-        cmd.data.hubName.name[sizeof(cmd.data.hubName.name) - 1] = '\0'; // Ensure null termination
-
-        if (sendCommand(cmd, pdMS_TO_TICKS(100)) != pdTRUE)
-        {
-            DEBUG_LOG("WARNING: Failed to queue hub name command");
-        }
-    }
-    else
-    {
-        DEBUG_LOG("ERROR: Command queue is not initialized");
-    }
+    HubCommand cmd = createHubCommand(CommandType::CMD_SET_HUB_NAME);
+    strncpy(cmd.data.hubName.name, name, sizeof(cmd.data.hubName.name) - 1);
+    cmd.data.hubName.name[sizeof(cmd.data.hubName.name) - 1] = '\0'; // Ensure null termination
+    queueCommand(cmd, "hub name");
 }
 
 /**
@@ -506,20 +525,9 @@ void DuploHub::setHubName(const char *name)
  */
 void DuploHub::setLedColor(DuploEnums::DuploColor color)
 {
-    if (commandQueue != nullptr)
-    {
-        HubCommand cmd = createHubCommand(CommandType::CMD_SET_LED_COLOR);
-        cmd.data.led.color = (DuploEnums::DuploColor)color;
-
-        if (sendCommand(cmd, pdMS_TO_TICKS(100)) != pdTRUE)
-        {
-            DEBUG_LOG("WARNING: Failed to queue LED color command");
-        }
-    }
-    else
-    {
-        DEBUG_LOG("ERROR: Command queue is not initialized");
-    }
+    HubCommand cmd = createHubCommand(CommandType::CMD_SET_LED_COLOR);
+    cmd.data.led.color = color;
+    queueCommand(cmd, "LED color");
 }
 
 /**
@@ -528,20 +536,9 @@ void DuploHub::setLedColor(DuploEnums::DuploColor color)
  */
 void DuploHub::setMotorSpeed(int speed)
 {
-    if (commandQueue != nullptr)
-    {
-        HubCommand cmd = createHubCommand(CommandType::CMD_MOTOR_SPEED);
-        cmd.data.motor.speed = speed;
-
-        if (sendCommand(cmd, pdMS_TO_TICKS(100)) != pdTRUE)
-        {
-            DEBUG_LOG("WARNING: Failed to queue motor speed command");
-        }
-    }
-    else
-    {
-        DEBUG_LOG("ERROR: Command queue is not initialized");
-    }
+    HubCommand cmd = createHubCommand(CommandType::CMD_MOTOR_SPEED);
+    cmd.data.motor.speed = speed;
+    queueCommand(cmd, "motor speed");
 }
 
 /**
@@ -549,19 +546,7 @@ void DuploHub::setMotorSpeed(int speed)
  */
 void DuploHub::stopMotor()
 {
-    if (commandQueue != nullptr)
-    {
-        HubCommand cmd = createHubCommand(CommandType::CMD_STOP_MOTOR);
-
-        if (sendCommand(cmd, pdMS_TO_TICKS(100)) != pdTRUE)
-        {
-            DEBUG_LOG("WARNING: Failed to queue stop motor command");
-        }
-    }
-    else
-    {
-        DEBUG_LOG("ERROR: Command queue is not initialized");
-    }
+    queueCommand(createHubCommand(CommandType::CMD_STOP_MOTOR), "stop motor");
 }
 
 /**
@@ -570,25 +555,9 @@ void DuploHub::stopMotor()
  */
 void DuploHub::playSound(int soundId)
 {
-    DEBUG_LOG("DuploHub: playSound called with soundId: %d", soundId);
-    if (commandQueue != nullptr)
-    {
-        HubCommand cmd = createHubCommand(CommandType::CMD_PLAY_SOUND);
-        cmd.data.sound.soundId = soundId;
-
-        if (sendCommand(cmd, pdMS_TO_TICKS(100)) != pdTRUE)
-        {
-            DEBUG_LOG("WARNING: Failed to queue play sound command");
-        }
-        else
-        {
-            DEBUG_LOG("DuploHub: Sound command queued successfully");
-        }
-    }
-    else
-    {
-        DEBUG_LOG("ERROR: Command queue not initialized - cannot play sound");
-    }
+    HubCommand cmd = createHubCommand(CommandType::CMD_PLAY_SOUND);
+    cmd.data.sound.soundId = soundId;
+    queueCommand(cmd, "play sound");
 }
 
 /**
@@ -596,19 +565,7 @@ void DuploHub::playSound(int soundId)
  */
 void DuploHub::activateRgbLight()
 {
-    if (commandQueue != nullptr)
-    {
-        HubCommand cmd = createHubCommand(CommandType::CMD_ACTIVATE_RGB_LIGHT);
-
-        if (sendCommand(cmd, pdMS_TO_TICKS(100)) != pdTRUE)
-        {
-            DEBUG_LOG("WARNING: Failed to queue activate RGB light command");
-        }
-    }
-    else
-    {
-        DEBUG_LOG("ERROR: Command queue is not initialized");
-    }
+    queueCommand(createHubCommand(CommandType::CMD_ACTIVATE_RGB_LIGHT), "activate RGB light");
 }
 
 /**
@@ -616,19 +573,7 @@ void DuploHub::activateRgbLight()
  */
 void DuploHub::activateBaseSpeaker()
 {
-    if (commandQueue != nullptr)
-    {
-        HubCommand cmd = createHubCommand(CommandType::CMD_ACTIVATE_BASE_SPEAKER);
-
-        if (sendCommand(cmd, pdMS_TO_TICKS(100)) != pdTRUE)
-        {
-            DEBUG_LOG("WARNING: Failed to queue activate base speaker command");
-        }
-    }
-    else
-    {
-        DEBUG_LOG("ERROR: Command queue is not initialized");
-    }
+    queueCommand(createHubCommand(CommandType::CMD_ACTIVATE_BASE_SPEAKER), "activate base speaker");
 }
 
 /**
@@ -636,19 +581,7 @@ void DuploHub::activateBaseSpeaker()
  */
 void DuploHub::activateColorSensor()
 {
-    if (commandQueue != nullptr)
-    {
-        HubCommand cmd = createHubCommand(CommandType::CMD_ACTIVATE_COLOR_SENSOR);
-
-        if (sendCommand(cmd, pdMS_TO_TICKS(100)) != pdTRUE)
-        {
-            DEBUG_LOG("WARNING: Failed to queue activate color sensor command");
-        }
-    }
-    else
-    {
-        DEBUG_LOG("ERROR: Command queue is not initialized");
-    }
+    queueCommand(createHubCommand(CommandType::CMD_ACTIVATE_COLOR_SENSOR), "activate color sensor");
 }
 
 /**
@@ -656,19 +589,7 @@ void DuploHub::activateColorSensor()
  */
 void DuploHub::activateSpeedSensor()
 {
-    if (commandQueue != nullptr)
-    {
-        HubCommand cmd = createHubCommand(CommandType::CMD_ACTIVATE_SPEED_SENSOR);
-
-        if (sendCommand(cmd, pdMS_TO_TICKS(100)) != pdTRUE)
-        {
-            DEBUG_LOG("WARNING: Failed to queue activate speed sensor command");
-        }
-    }
-    else
-    {
-        DEBUG_LOG("ERROR: Command queue is not initialized");
-    }
+    queueCommand(createHubCommand(CommandType::CMD_ACTIVATE_SPEED_SENSOR), "activate speed sensor");
 }
 
 /**
@@ -676,19 +597,7 @@ void DuploHub::activateSpeedSensor()
  */
 void DuploHub::activateVoltageSensor()
 {
-    if (commandQueue != nullptr)
-    {
-        HubCommand cmd = createHubCommand(CommandType::CMD_ACTIVATE_VOLTAGE_SENSOR);
-
-        if (sendCommand(cmd, pdMS_TO_TICKS(100)) != pdTRUE)
-        {
-            DEBUG_LOG("WARNING: Failed to queue activate voltage sensor command");
-        }
-    }
-    else
-    {
-        DEBUG_LOG("ERROR: Command queue is not initialized");
-    }
+    queueCommand(createHubCommand(CommandType::CMD_ACTIVATE_VOLTAGE_SENSOR), "activate voltage sensor");
 }
 
 /**

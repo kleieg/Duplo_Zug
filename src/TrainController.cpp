@@ -819,46 +819,19 @@ void replayNextCommand()
     DEBUG_LOG("TrainController: Replaying command type %d", cmd->type);
     if (!emergencyStop)
     {
-        // Execute the command based on its type
-        switch (cmd->type)
+        // The recorded command is queued as-is; the BLE task executes it like a live command.
+        duploHub.replayCommand(*cmd);
+
+        // Keep speed bookkeeping and the knob in sync with what the train is doing.
+        if (cmd->type == CMD_MOTOR_SPEED)
         {
-        case CMD_MOTOR_SPEED:
-            duploHub.setMotorSpeed(cmd->data.motor.speed);
             lastSpeed = cmd->data.motor.speed;
             rotaryEncoder.setEncoderValue(-lastSpeed);
-            break;
-        case CMD_STOP_MOTOR:
-            duploHub.stopMotor();
+        }
+        else if (cmd->type == CMD_STOP_MOTOR)
+        {
             lastSpeed = 0;
             rotaryEncoder.setEncoderValue(0);
-            break;
-        case CMD_SET_LED_COLOR:
-            duploHub.setLedColor(cmd->data.led.color);
-            break;
-        case CMD_PLAY_SOUND:
-            duploHub.playSound(cmd->data.sound.soundId);
-            break;
-        case CMD_SET_HUB_NAME:
-            duploHub.setHubName(cmd->data.hubName.name);
-            break;
-        case CMD_ACTIVATE_RGB_LIGHT:
-            duploHub.activateRgbLight();
-            break;
-        case CMD_ACTIVATE_BASE_SPEAKER:
-            duploHub.activateBaseSpeaker();
-            break;
-        case CMD_ACTIVATE_COLOR_SENSOR:
-            duploHub.activateColorSensor();
-            break;
-        case CMD_ACTIVATE_SPEED_SENSOR:
-            duploHub.activateSpeedSensor();
-            break;
-        case CMD_ACTIVATE_VOLTAGE_SENSOR:
-            duploHub.activateVoltageSensor();
-            break;
-        default:
-            DEBUG_LOG("TrainController: Unknown command type %d in replay", cmd->type);
-            break;
         }
         DEBUG_LOG("TrainController: Replayed command type %d", cmd->type);
     }

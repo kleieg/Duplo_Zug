@@ -192,6 +192,13 @@ private:
     BaseType_t sendCommand(const HubCommand &cmd, TickType_t timeout);
 
     /**
+     * @brief Queue a command for the BLE task and log failures.
+     * @param cmd Command to queue.
+     * @param what Short description used in log messages.
+     */
+    void queueCommand(const HubCommand &cmd, const char *what);
+
+    /**
      * @brief Lazily create the timer that debounces color sensor readings.
      *
      * @return True when the timer exists and is ready to start.
@@ -363,6 +370,12 @@ public:
      * @return Pointer to the next command if ready, nullptr if no command ready or replay finished
      */
     const HubCommand *getNextReplayCommand();
+
+    /**
+     * @brief Queue a recorded command for execution (used by replay).
+     * @param cmd Command previously returned by `getNextReplayCommand()`.
+     */
+    void replayCommand(const HubCommand &cmd);
 
     /**
      * @brief Check if replay is currently active
