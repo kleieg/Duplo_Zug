@@ -98,7 +98,7 @@ Case/
 The case was designed based on a library and an example from MachineBlocks.
 It covers the case with a bottom part and a lid with cutouts for 6 buttons, the encoder, and the USB connector.
 
-There are 2 black buttons for recording (with red dot) and replay (with white triangle). The red button is used to initiate the emergency stop, the blue button is used for water refill, the white button to switch the headlight LED of the train, and the yellow to activate different sounds.
+There are 2 black buttons for recording (with red dot) and replay (with white triangle). The red button stops the train (plain stop, like pressing the encoder), the blue button is used for water refill, the white button to switch the headlight LED of the train, and the yellow to activate different sounds.
 
 
 <p align="center">

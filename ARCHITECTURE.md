@@ -127,7 +127,6 @@ Current behavior:
 - green short heartbeat: idle and ready
 - violet blinking: recording
 - yellow blinking: replay
-- red steady: emergency stop
 - white blink burst: disconnect
 
 ### Input gating

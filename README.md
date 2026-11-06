@@ -78,7 +78,6 @@ The controller LED indicates the current state as follows:
 - Green occasional short pulses: operational and idle
 - Violet blinking: recording active
 - Yellow blinking: replay active
-- Solid red: emergency stop active
 - Red short blink sequence: train low-voltage warning
 - White blinking: hub disconnected
 - 5x green: wake from sleep confirmed
@@ -94,7 +93,7 @@ Important: Green now explicitly means not just "connected" but "ready for comman
 - Hold encoder during startup >= 2 s: open 10-second upload window
 - REC: start/stop recording
 - PLAY: play the latest recording once
-- STOP: stop replay/recording and toggle emergency stop
+- STOP: stop the train (same as encoder press), also ends a replay
 - LIGHT: cycle train light colors
 - SOUND: cycle sounds
 - WATER: trigger water action

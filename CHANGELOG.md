@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Changed (behavior)
+
+- STOP is now a plain stop, identical to pressing the dial: motor stop, replay ends, knob to 0, silent, nothing locked. The latching emergency stop (steady red LED, brake sound + red train light, ignoring dial/color bricks/RECORD/PLAY) was removed. A running recording now continues and records the stop.
+
 ### Added
 
 - Dial (encoder) button while awake: press = normal stop (immediate, nothing locked, also ends a replay; STOP stays the latching emergency stop), hold 2 s = fast red blinking, sleep on release. The press that wakes the controller is ignored until released.

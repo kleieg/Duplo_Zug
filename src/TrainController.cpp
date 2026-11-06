@@ -19,7 +19,7 @@
  * - Automatic BLE connection management and recovery
  * - Modular callback system for sensor and event handling
  * - Record and replay of command sequences for automated demos
- * - Emergency stop and user input via debounced buttons and rotary encoder
+ * - Stop (STOP button or dial press) and user input via debounced buttons and rotary encoder
  *
  * Demo Sequence:
  * - LED color changes (GREEN, RED, etc.)
@@ -129,7 +129,11 @@ unsigned long lastUserActionTime = 0;
 static int detectedSpeed = 0;
 static float detectedVoltage = 0.0f;
 static int detectedColor = 0;
-static bool emergencyStop = false;
+
+/**
+ * @brief Plain stop (STOP button and dial press): stop motor, end replay, knob to 0.
+ */
+static void normalStop();
 
 // High-level operating modes used by the main loop and status LED logic.
 static bool recording = false;
@@ -285,9 +289,9 @@ CRGB::HTMLColorCode rgbColors[] = {
     CRGB::White};
 
 /**
- * @brief Handles button presses for sound, light, water, and emergency stop.
+ * @brief Handles button presses for sound, light, water, record/play and stop.
  *
- * Cycles through sounds and LED colors, triggers water sound, and toggles emergency stop.
+ * Cycles through sounds and LED colors, triggers water sound, and stops the train.
  */
 void handleButtons(int btn_no, bool pressed)
 {
@@ -312,13 +316,6 @@ void handleButtons(int btn_no, bool pressed)
     if (replay && btn_no != BUTTON_STOP && btn_no != BUTTON_PLAY)
     {
         DEBUG_LOG("TrainController: Ignoring button %d during replay", btn_no);
-        return;
-    }
-
-    // During emergency stop, record and replay are locked; STOP releases the stop first.
-    if (emergencyStop && (btn_no == BUTTON_RECORD || btn_no == BUTTON_PLAY))
-    {
-        DEBUG_LOG("TrainController: Ignoring button %d during emergency stop", btn_no);
         return;
     }
 
@@ -376,39 +373,8 @@ void handleButtons(int btn_no, bool pressed)
         DEBUG_LOG("TrainController: Playback %s", replay ? "started" : "skipped (nothing recorded)");
         break;
     case BUTTON_STOP:
-        // If replay is active, stop replay and playback immediately
-        if (replay)
-        {
-            duploHub.stopReplay();
-            replay = false;
-            DEBUG_LOG("TrainController: STOP pressed during replay, replay stopped before emergency stop handling");
-        }
-
-        if (recording)
-        {
-            recording = false;
-            duploHub.recordCommands(false);
-            DEBUG_LOG("TrainController: Recording stopped because STOP was pressed");
-        }
-
-        emergencyStop = !emergencyStop; // Toggle emergency stop state
-        if (emergencyStop)
-        {
-            // Stop first: sound and LED commands each hold the BLE task for ~200 ms.
-            duploHub.stopMotor();
-            duploHub.playSound((DuploEnums::DuploSound::BRAKE)); // Play brake sound
-            duploHub.setLedColor(DuploEnums::DuploColor::RED);
-            lastSpeed = 0;
-            rotaryEncoder.setEncoderValue(0);
-            encoderValuePending.store(false); // Discard knob input that predates the stop
-        }
-        else
-        {
-            duploHub.playSound((DuploEnums::DuploSound::STATION_DEPARTURE)); // Play departure sound
-            duploHub.setLedColor(DuploEnums::DuploColor::GREEN);             // Set LED to green
-        }
-        // The controller LED follows the mode automatically (see updateModeIndication()).
-        DEBUG_LOG("TrainController: Emergency stop %s", emergencyStop ? "activated" : "deactivated");
+        // Same plain stop as the dial press: nothing is locked, turning the dial drives again.
+        normalStop();
         break;
     default:
         DEBUG_LOG("TrainController: Unknown button %d", btn_no);
@@ -452,9 +418,9 @@ static void processEncoder()
         return;
     }
 
-    // Turns while not ready or during emergency stop are discarded and the knob is re-centered,
+    // Turns while not ready are discarded and the knob is re-centered,
     // so the knob position and the train speed stay in sync.
-    if (!hubReady || emergencyStop)
+    if (!hubReady)
     {
         encoderValuePending.store(false);
         rotaryEncoder.setEncoderValue(0);
@@ -518,13 +484,6 @@ static void detectedColorCb(DuploEnums::DuploColor color)
 
     detectedColor = color; // Store the detected color
 
-    // Emergency stop has priority: a stopped train that is pushed onto a tile must not drive off.
-    if (emergencyStop)
-    {
-        DEBUG_LOG("TrainController: Color action ignored during emergency stop");
-        return;
-    }
-
     switch (color)
     {
     case DuploEnums::DuploColor::BLACK:
@@ -534,7 +493,7 @@ static void detectedColorCb(DuploEnums::DuploColor color)
 
     case DuploEnums::DuploColor::RED:
         DEBUG_LOG("TrainController:  Detected Color: %d", DuploEnums::DuploColor::RED);
-        // Event burst like the other tiles; steady red is reserved for the emergency stop.
+        // Event burst like the other tiles.
         statusLed.setColor(CRGB::Red);
         statusLed.setBlinking(true, 250, 250, 3);
         duploHub.stopMotor();                                // Stop first, then sound and LED
@@ -806,8 +765,8 @@ static void updateHubInitialization()
 /**
  * @brief Execute the next recorded command when its playback timestamp arrives.
  *
- * Pulls commands from the hub's replay buffer in chronological order, skipping execution if the
- * emergency stop is active. When the sequence completes, the LED and replay flags are reset.
+ * Pulls commands from the hub's replay buffer in chronological order. When the sequence
+ * completes, the replay flag is reset.
  */
 void replayNextCommand()
 {
@@ -827,23 +786,20 @@ void replayNextCommand()
         return;
     }
     DEBUG_LOG("TrainController: Replaying command type %d", cmd->type);
-    if (!emergencyStop)
-    {
-        // The recorded command is queued as-is; the BLE task executes it like a live command.
-        duploHub.replayCommand(*cmd);
 
-        // Keep speed bookkeeping and the knob in sync with what the train is doing.
-        if (cmd->type == CMD_MOTOR_SPEED)
-        {
-            lastSpeed = cmd->data.motor.speed;
-            rotaryEncoder.setEncoderValue(-lastSpeed);
-        }
-        else if (cmd->type == CMD_STOP_MOTOR)
-        {
-            lastSpeed = 0;
-            rotaryEncoder.setEncoderValue(0);
-        }
-        DEBUG_LOG("TrainController: Replayed command type %d", cmd->type);
+    // The recorded command is queued as-is; the BLE task executes it like a live command.
+    duploHub.replayCommand(*cmd);
+
+    // Keep speed bookkeeping and the knob in sync with what the train is doing.
+    if (cmd->type == CMD_MOTOR_SPEED)
+    {
+        lastSpeed = cmd->data.motor.speed;
+        rotaryEncoder.setEncoderValue(-lastSpeed);
+    }
+    else if (cmd->type == CMD_STOP_MOTOR)
+    {
+        lastSpeed = 0;
+        rotaryEncoder.setEncoderValue(0);
     }
 }
 
@@ -900,7 +856,7 @@ void setup()
     // setup push buttons and register callback
     guiButtons.addButtonRange(BUTTON_RECORD, 430, 875);  // Button 1: Record sequence (nominal ~670)
     guiButtons.addButtonRange(BUTTON_PLAY, 1115, 1505);  // Button 2: Play recorded sequence (nominal ~1320)
-    guiButtons.addButtonRange(BUTTON_STOP, 1745, 2095);  // Button 3: Emergency Stop (nominal ~1930)
+    guiButtons.addButtonRange(BUTTON_STOP, 1745, 2095);  // Button 3: Stop (nominal ~1930)
     guiButtons.addButtonRange(BUTTON_WATER, 2335, 2675); // Button 4: Make sound fill up water (nominal ~2500)
     guiButtons.addButtonRange(BUTTON_LIGHT, 2915, 3270); // Button 5: Change lights (nominal ~3090)
     guiButtons.addButtonRange(BUTTON_SOUND, 3510, 3870); // Button 6: Sound (nominal ~3690)
@@ -975,7 +931,6 @@ static bool shouldShowReadyHeartbeat()
            hubReady &&
            !recording &&
            !replay &&
-           !emergencyStop &&
            noLowVoltageWarningPending;
 }
 
@@ -1020,8 +975,7 @@ enum class LedMode
     None,          ///< No mode: LED off (ready heartbeat bursts are added separately)
     Initializing,  ///< Hub connected, initialization running: blue blinking
     Recording,     ///< Recording: violet blinking
-    Replay,        ///< Replay: yellow blinking
-    EmergencyStop  ///< Emergency stop: steady red
+    Replay         ///< Replay: yellow blinking
 };
 
 static LedMode shownLedMode = LedMode::Unknown;
@@ -1031,8 +985,6 @@ static LedMode shownLedMode = LedMode::Unknown;
  */
 static LedMode currentLedMode()
 {
-    if (emergencyStop)
-        return LedMode::EmergencyStop;
     if (replay)
         return LedMode::Replay;
     if (recording)
@@ -1045,7 +997,7 @@ static LedMode currentLedMode()
 /**
  * @brief Show the current mode on the status LED whenever no burst is playing.
  *
- * Single place that drives mode patterns, so a mode indication (e.g. emergency stop) can no
+ * Single place that drives mode patterns, so a mode indication (e.g. recording) can no
  * longer be lost after a disconnect, wake or tile burst.
  */
 static void updateModeIndication()
@@ -1065,9 +1017,6 @@ static void updateModeIndication()
 
     switch (mode)
     {
-    case LedMode::EmergencyStop:
-        statusLed.setColor(CRGB::Red); // steady
-        break;
     case LedMode::Replay:
         statusLed.setColor(CRGB::Yellow);
         statusLed.setBlinking(true, 500, 1000);
@@ -1263,7 +1212,7 @@ void checkStatus(DuploHub &duploHub)
         lastStatusUpdate = millis();
     }
 
-    // Low-voltage burst; the current mode (e.g. emergency stop) is restored afterwards.
+    // Low-voltage burst; the current mode (e.g. recording) is restored afterwards.
     if (isLowVoltage() && !wakeBlinkActive && !statusLed.isBurstActive() &&
         millis() - lastVoltageWarning > VOLTAGE_WARNING_INTERVAL_MS)
     {
@@ -1332,15 +1281,15 @@ void esp_goto_sleep()
 }
 
 /**
- * @brief Normal (non-latching) stop from the dial button.
+ * @brief Plain stop, shared by the STOP button and the dial press.
  *
- * Stops the motor, ends a running replay and re-centers the knob. Unlike the emergency stop
- * nothing is locked: turning the dial drives again. Ignored while not ready or during
- * emergency stop (the train is already stopped then).
+ * Stops the motor, ends a running replay and re-centers the knob. Nothing is locked: turning
+ * the dial drives again. A running recording continues and records the stop. Ignored while
+ * the hub is not ready.
  */
 static void normalStop()
 {
-    if (!hubReady || emergencyStop)
+    if (!hubReady)
     {
         return;
     }
@@ -1353,7 +1302,7 @@ static void normalStop()
     lastSpeed = 0;
     rotaryEncoder.setEncoderValue(0);
     encoderValuePending.store(false);
-    DEBUG_LOG("TrainController: Dial pressed - normal stop");
+    DEBUG_LOG("TrainController: Stop (STOP button or dial)");
 }
 
 /**
