@@ -101,7 +101,10 @@ ONLY ON ESP32-S3 DEVKITC-1 WITH DUAL CORE
 #define ENCODER_A 12               // Encoder A pin
 #define ENCODER_B 13               // Encoder B pin
 #define ENCODER_BTN 11             // Encoder button pin
-#define ENCODER_STEPS_PER_DETENT 8 // Higher sensitivity than the library default of 4
+// Quadrature edges the library needs per value change. A standard encoder produces 4 edges per
+// detent (click), so 4 = one speed step per click. Higher values make the dial LESS sensitive
+// (8 needed two clicks per step). Increase only if the encoder bounces and produces extra steps.
+#define ENCODER_STEPS_PER_DETENT 4
 
 // Create rotary encoder instance
 //RotaryEncoder rotaryEncoder = RotaryEncoder(ENCODER_A, ENCODER_B, RE_DEFAULT_PIN, RE_DEFAULT_PIN, ENCODER_STEPS_PER_DETENT); //, ENCODER_BTN);
@@ -144,7 +147,11 @@ static std::atomic<bool> encoderValuePending{false};
 static std::atomic<bool> hubConnectedEventPending{false};
 static std::atomic<bool> hubDisconnectedEventPending{false};
 
-ADCButtons guiButtons = ADCButtons(ADC_PIN);
+// A press is reported after `ADC_BUTTON_SAMPLES` settling samples plus `ADC_BUTTON_SAMPLES`
+// averaged samples, one sample per loop pass (~20 ms): 4 -> ~160-200 ms hold time
+// (was 10 -> ~0.4-0.5 s). Increase if presses get misdetected while the ladder capacitor settles.
+#define ADC_BUTTON_SAMPLES 4
+ADCButtons guiButtons = ADCButtons(ADC_PIN, ADC_BUTTON_SAMPLES);
 
 /**
  * @brief Configure deep-sleep wake handling for the encoder button.
