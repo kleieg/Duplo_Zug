@@ -578,15 +578,62 @@ static void detectedVoltageCb(float voltage)
     detectedVoltage = voltage;
 }
 
-// Function to process the responseQueue and print detected color
+// Minimum time after a target speed change before a reported speed of 0 counts as a hub
+// auto-stop (covers start-up and passing through 0 when the direction changes).
+#define AUTO_STOP_GRACE_MS 1000
+
 /**
  * @brief Callback for detected speed events from the speed sensor.
- * @param speed The detected speed value.
+ *
+ * Also keeps the controller in sync with the hub's built-in safety stop: the DUPLO hub cuts the
+ * motor by itself when the train is blocked, lifted or pressed down. If the train was seen moving
+ * at the current target speed and then reports 0, the target is reset to 0 (stop sent, knob to 0),
+ * so the next dial click starts from standstill instead of the old speed.
+ *
+ * The sensor only reports changes, so "seen moving" is any non-zero report after the target last
+ * changed. Not applied during replay.
+ *
+ * @param speed The detected speed value (normalized, 0 = stopped).
  */
 static void detectedSpeedCb(int speed)
 {
+    static int observedTarget = 0;
+    static unsigned long targetChangedMs = 0;
+    static bool seenMoving = false;
+
     DEBUG_LOG("TrainController:  Detected Speed: %d", speed);
     detectedSpeed = speed;
+
+    const unsigned long now = millis();
+    if (lastSpeed != observedTarget)
+    {
+        // Target changed since the last report: start over (first report after the change).
+        observedTarget = lastSpeed;
+        targetChangedMs = now;
+        seenMoving = false;
+    }
+
+    if (lastSpeed == 0 || replay)
+    {
+        return;
+    }
+
+    if (speed != 0)
+    {
+        seenMoving = true;
+        return;
+    }
+
+    if (seenMoving && now - targetChangedMs >= AUTO_STOP_GRACE_MS)
+    {
+        DEBUG_LOG("TrainController: Train stopped by itself (blocked/lifted) - target %d reset to 0", lastSpeed);
+        duploHub.stopMotor();
+        lastSpeed = 0;
+        observedTarget = 0;
+        seenMoving = false;
+        rotaryEncoder.setEncoderValue(0);
+        encoderValuePending.store(false);
+    }
 }
 
 // Last known BLE address of the currently connected train hub.
