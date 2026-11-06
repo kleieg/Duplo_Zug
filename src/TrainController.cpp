@@ -977,8 +977,9 @@ void setup()
 
     if (!wakeBlinkActive)
     {
-        statusLed.setColor(CRGB::Yellow);      // Set color to yellow during init
-        statusLed.setBlinking(true, 200, 300); // Blink: 200ms on, 300ms off
+        // Steady white while setup() runs (the LED is only animated from loop()). The only steady
+        // color, so it cannot be confused with a mode; if boot ever hangs, the LED stays white.
+        statusLed.setColor(CRGB::White);
     }
 
     // setup push buttons and register callback

@@ -180,7 +180,7 @@ Bursts:
 - 5x green: woke from sleep
 - fast red while the dial is held: sleep on release; 2x red: entering sleep
 
-Yellow blinking also shows during boot.
+Boot: steady white while `setup()` runs (about 1.5 s); a hang during boot leaves it white.
 
 ## Power Management
 

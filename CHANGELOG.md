@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed (behavior)
 
+- Status LED: boot is shown as steady white instead of yellow, so yellow blinking only means replay.
 - Status LED: while no train is connected (searching), a short blue flash every ~1.5 s is shown; previously the LED was off after boot until a train connected.
 
 - STOP is now a plain stop, identical to pressing the dial: motor stop, replay ends, knob to 0, silent, nothing locked. The latching emergency stop (steady red LED, brake sound + red train light, ignoring dial/color bricks/RECORD/PLAY) was removed. A running recording now continues and records the stop.

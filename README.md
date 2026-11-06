@@ -72,7 +72,7 @@ Implemented features (high level):
 
 The controller LED indicates the current state as follows:
 
-- Yellow blinking: controller is booting
+- Steady white (about 1.5 s): controller is booting
 - Short blue flash every ~1.5 s: no train connected, searching
 - Fast blue blinking: BLE link is up, hub initialization still running
 - Green blinking: hub is operational and commands can be executed
