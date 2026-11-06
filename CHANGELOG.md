@@ -64,8 +64,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Documentation
 
-- Added `Refactorings.md` as central technical record for refactorings, rationale, and migration planning.
-- Added migration analysis and phased facade implementation plan for consolidating Legoino usage via `myLegoHub`.
+- `ARCHITECTURE.md` updated to the current design (inputs, stop sync, LED mode/burst model, sleep/wake, watchdog, modules, framework constraint).
+- Removed `Refactorings.md`; the planned Legoino facade consolidation via `myLegoHub` was dropped (all Legoino calls are confined to `DuploHub.cpp`, an extra wrapper layer would add nothing).
+- `ToDo.md` reset; remaining ideas were reviewed and either done, dropped or listed in the session notes.
 
 ## [2.2.0] - 2026-02-25
 
