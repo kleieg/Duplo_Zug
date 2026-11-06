@@ -10,6 +10,44 @@
 
 #include "Lpf2Hub.h"
 
+// Project-local diagnostics (DUPLO controller): log outgoing commands and the hub's command
+// feedback (0x82) / port input format confirmations (0x47) with timestamps, to evaluate
+// feedback-based command pacing. Logging only, no behavior change. Set to 0 to disable.
+#define LWP_FEEDBACK_DIAG 1
+
+#if LWP_FEEDBACK_DIAG
+/**
+ * @brief Print one LWP message as hex with a millisecond timestamp (diagnostics only).
+ */
+static void lwpDiagPrint(const char *direction, const uint8_t *data, int length, const char *note = nullptr)
+{
+    char line[160];
+    int pos = snprintf(line, sizeof(line), "[LWP %s %lu]", direction, millis());
+    for (int i = 0; i < length && pos < (int)sizeof(line) - 4; i++)
+    {
+        pos += snprintf(line + pos, sizeof(line) - pos, " %02x", data[i]);
+    }
+    if (note != nullptr && pos < (int)sizeof(line) - 2)
+    {
+        snprintf(line + pos, sizeof(line) - pos, "  %s", note);
+    }
+    Serial.println(line);
+}
+
+/**
+ * @brief Decode the feedback bits of a Port Output Command Feedback message (0x82).
+ */
+static void lwpDiagDescribeFeedback(uint8_t feedback, char *out, size_t outSize)
+{
+    snprintf(out, outSize, "%s%s%s%s%s",
+             (feedback & 0x01) ? "in-progress " : "",
+             (feedback & 0x02) ? "completed " : "",
+             (feedback & 0x04) ? "DISCARDED " : "",
+             (feedback & 0x08) ? "idle " : "",
+             (feedback & 0x10) ? "BUSY/FULL " : "");
+}
+#endif
+
 /**
  * Callback if a scan has ended with the results of found devices
  * only needed to enforce the non blocking scan start
@@ -133,6 +171,9 @@ bool Lpf2Hub::WriteValue(byte command[], int size)
     {
         if (_pRemoteCharacteristic->writeValue(commandWithCommonHeader, sizeof(commandWithCommonHeader), false))
         {
+#if LWP_FEEDBACK_DIAG
+            lwpDiagPrint("TX", commandWithCommonHeader, sizeof(commandWithCommonHeader));
+#endif
             return true;
         }
         delay(WRITE_RETRY_DELAY_MS);
@@ -787,6 +828,26 @@ void Lpf2Hub::notifyCallback(
     bool isNotify)
 {
     log_d("notify callback for characteristic %s", pBLERemoteCharacteristic->getUUID().toString().c_str());
+
+#if LWP_FEEDBACK_DIAG
+    if (length >= 3 && pData[2] == (byte)MessageType::PORT_OUTPUT_COMMAND_FEEDBACK)
+    {
+        // Payload: one or more (port, feedback) pairs after the 3-byte header.
+        char note[96] = "";
+        size_t notePos = 0;
+        for (size_t i = 3; i + 1 < length && notePos < sizeof(note) - 1; i += 2)
+        {
+            char bits[64];
+            lwpDiagDescribeFeedback(pData[i + 1], bits, sizeof(bits));
+            notePos += snprintf(note + notePos, sizeof(note) - notePos, "port %02x: %s", pData[i], bits);
+        }
+        lwpDiagPrint("RX feedback", pData, (int)length, note);
+    }
+    else if (length >= 3 && pData[2] == (byte)MessageType::PORT_INPUT_FORMAT_SINGLE)
+    {
+        lwpDiagPrint("RX input-format", pData, (int)length, "port setup confirmed");
+    }
+#endif
 
     switch (pData[2])
     {
