@@ -10,7 +10,8 @@
 ## 2. Controller LED Meaning
 
 - Yellow blinking: controller is starting
-- Blue blinking: connection is established, train initialization still in progress
+- Short blue flash every ~1.5 s: searching for the train (not connected)
+- Fast blue blinking: connection is established, train initialization still in progress
 - Green blinking: train is ready for commands
 - Green short pulses: ready, but currently idle
 - Violet blinking: recording active

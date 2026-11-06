@@ -167,7 +167,8 @@ Modes (priority order):
 
 - yellow blinking: replay
 - violet blinking: recording
-- blue blinking: connected, still initializing
+- short blue flash every ~1.5 s: no train connected, searching
+- fast blue blinking: connected, still initializing
 - off (plus green heartbeat, 2 short blinks every 8 s, when idle and ready)
 
 Bursts:

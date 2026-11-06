@@ -1102,6 +1102,7 @@ enum class LedMode
 {
     Unknown,       ///< Nothing applied yet / must be re-applied
     None,          ///< No mode: LED off (ready heartbeat bursts are added separately)
+    Searching,     ///< No train connected, scanning: short blue flash every ~1.5 s
     Initializing,  ///< Hub connected, initialization running: blue blinking
     Recording,     ///< Recording: violet blinking
     Replay         ///< Replay: yellow blinking
@@ -1118,6 +1119,8 @@ static LedMode currentLedMode()
         return LedMode::Replay;
     if (recording)
         return LedMode::Recording;
+    if (!duploHub.isConnected())
+        return LedMode::Searching;
     if (hubInitializationActive)
         return LedMode::Initializing;
     return LedMode::None;
@@ -1153,6 +1156,10 @@ static void updateModeIndication()
     case LedMode::Recording:
         statusLed.setColor(CRGB::Purple);
         statusLed.setBlinking(true, 500, 1000);
+        break;
+    case LedMode::Searching:
+        statusLed.setColor(CRGB::Blue);
+        statusLed.setBlinking(true, 100, 1400);
         break;
     case LedMode::Initializing:
         statusLed.setColor(CRGB::Blue);
