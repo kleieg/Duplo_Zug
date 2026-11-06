@@ -75,24 +75,24 @@ The controller LED indicates the current state as follows:
 - Steady white (about 1.5 s): controller is booting
 - Short blue flash every ~1.5 s: no train connected, searching
 - Fast blue blinking: BLE link is up, hub initialization still running
-- Green blinking: hub is operational and commands can be executed
+- 3x green: hub is operational and commands can be executed
 - Green occasional short pulses: operational and idle
-- Violet blinking: recording active
-- Yellow blinking: replay active
-- 5x fast red: train low-voltage warning (every 30 s)
-- 3x red: train stopped at a red track brick
+- Steady violet: recording active
+- Violet blinking: replay active
+- 5x fast yellow: train low-voltage warning (every 30 s)
 - 3x white: connection to the train lost (then back to the searching flash)
 - 5x green: wake from sleep confirmed
-- 2x red: sleep entry indication
+- Fast red while the encoder is held: release to sleep; 2x red: sleep entry indication
+- Color bricks: see below
 
 Important: Green now explicitly means not just "connected" but "ready for commands".
+Short bursts are events; afterwards the LED returns to the current state.
 
 ## Controls
 
 - Rotate encoder: set speed reverse, stop, forward
 - Press encoder: normal stop; in sleep: wake
 - Hold encoder 2 s, release: sleep now
-- Hold encoder during startup >= 2 s: open 10-second upload window
 - REC: start/stop recording
 - PLAY: play the latest recording once
 - STOP: stop the train (same as encoder press), also ends a replay
@@ -102,12 +102,17 @@ Important: Green now explicitly means not just "connected" but "ready for comman
 
 ## Color Bricks
 
-The following color bricks of the DUPLO Train are also recognized:
-- Yellow: horn
-- Red: stop train
-- Green: stop and switch driving direction
-- White: toggle light
-- Blue: water action, then continue at previous speed
+The following color bricks of the DUPLO Train are also recognized (ignored during recording and replay). The controller LED confirms each one with a short burst in the brick's color:
+
+| Brick | Train | Controller LED |
+|---|---|---|
+| Yellow | horn | 3x yellow |
+| Red | stop train | 3x red |
+| Green | stop and switch driving direction (from standstill: start at 40) | 3x green |
+| Blue | water action, then continue at previous speed | 3x blue |
+| White | toggle light | 2x white (light on) / 1x white (light off) |
+| Black | train light off | - |
+| Other colors | train light takes that color | - |
 
 ## Architecture in Short
 

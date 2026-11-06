@@ -977,8 +977,8 @@ void setup()
 
     if (!wakeBlinkActive)
     {
-        // Steady white while setup() runs (the LED is only animated from loop()). The only steady
-        // color, so it cannot be confused with a mode; if boot ever hangs, the LED stays white.
+        // Steady white while setup() runs (the LED is only animated from loop()). No other state
+        // shows steady white, so it cannot be confused; if boot ever hangs, the LED stays white.
         statusLed.setColor(CRGB::White);
     }
 
@@ -1105,8 +1105,8 @@ enum class LedMode
     None,          ///< No mode: LED off (ready heartbeat bursts are added separately)
     Searching,     ///< No train connected, scanning: short blue flash every ~1.5 s
     Initializing,  ///< Hub connected, initialization running: blue blinking
-    Recording,     ///< Recording: violet blinking
-    Replay         ///< Replay: yellow blinking
+    Recording,     ///< Recording: steady violet
+    Replay         ///< Replay: violet blinking
 };
 
 static LedMode shownLedMode = LedMode::Unknown;
@@ -1151,12 +1151,11 @@ static void updateModeIndication()
     switch (mode)
     {
     case LedMode::Replay:
-        statusLed.setColor(CRGB::Yellow);
+        statusLed.setColor(CRGB::Purple);
         statusLed.setBlinking(true, 500, 1000);
         break;
     case LedMode::Recording:
-        statusLed.setColor(CRGB::Purple);
-        statusLed.setBlinking(true, 500, 1000);
+        statusLed.setColor(CRGB::Purple); // steady
         break;
     case LedMode::Searching:
         statusLed.setColor(CRGB::Blue);
@@ -1354,8 +1353,8 @@ void checkStatus(DuploHub &duploHub)
         millis() - lastVoltageWarning > VOLTAGE_WARNING_INTERVAL_MS)
     {
         DEBUG_LOG("TrainController: Low voltage detected: %.2f V", detectedVoltage);
-        statusLed.setColor(CRGB::Red);            // Set LED to red for low voltage
-        statusLed.setBlinking(true, 100, 100, 5); // Blink red
+        statusLed.setColor(CRGB::Yellow);         // Low train battery: yellow
+        statusLed.setBlinking(true, 100, 100, 5); // 5 fast blinks
         lastVoltageWarning = millis();
     }
 }

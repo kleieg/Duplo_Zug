@@ -14,17 +14,17 @@
 - Fast blue blinking: connection is established, train initialization still in progress
 - Green blinking: train is ready for commands
 - Green short pulses: ready, but currently idle
-- Violet blinking: recording active
-- Yellow blinking: playback active
+- Steady violet: recording active
+- Violet blinking: playback active
 - 3x red: train stopped at a red track brick
-- 5x fast red: train battery low (repeats every 30 seconds)
+- 5x fast yellow: train battery low (repeats every 30 seconds)
 - 3x white: train connection was lost
 - 3x green / blue / yellow: green / blue / yellow track brick detected
 - 5x green: controller has just woken from sleep
 
 Rule of thumb: the train is truly command-ready only when green is shown.
 Short blink bursts are events; after a burst the LED returns to the current mode
-(for example back to violet blinking while recording is still active).
+(for example back to steady violet while recording is still active).
 
 ## 3. Controls
 

@@ -148,7 +148,7 @@ The DUPLO hub cuts the motor by itself when the train is blocked, lifted or pres
 ### Voltage sensor
 
 - voltage events are rate-limited in the application
-- below 5 V a low-battery warning (5 fast red blinks) is shown every 30 s; no warning without a valid reading
+- below 5 V a low-battery warning (5 fast yellow blinks) is shown every 30 s; no warning without a valid reading
 
 ## Record and Replay
 
@@ -165,8 +165,8 @@ One RGB LED. Persistent modes are continuous patterns; events are finite blink b
 
 Modes (priority order):
 
-- yellow blinking: replay
-- violet blinking: recording
+- violet blinking: replay
+- steady violet: recording
 - short blue flash every ~1.5 s: no train connected, searching
 - fast blue blinking: connected, still initializing
 - off (plus green heartbeat, 2 short blinks every 8 s, when idle and ready)
@@ -175,7 +175,7 @@ Bursts:
 
 - 3x green: ready / green brick; 3x blue / yellow: blue / yellow brick; 1-2x white: white brick
 - 3x red: red brick
-- 5x fast red: train battery low
+- 5x fast yellow: train battery low
 - 3x white: connection lost
 - 5x green: woke from sleep
 - fast red while the dial is held: sleep on release; 2x red: entering sleep
