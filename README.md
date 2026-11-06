@@ -177,14 +177,11 @@ platformio run -e esp32-s3-input-monitor
 - [ARCHITECTURE.md](ARCHITECTURE.md): technical architecture and runtime model
 - [User Manual.md](User%20Manual.md): user operating guide
 - [hardware/Hardware.md](hardware/Hardware.md): hardware background
-- [Kommunikation intern/Protokolle/Projekt-Tagesprotokoll.md](Kommunikation%20intern/Protokolle/Projekt-Tagesprotokoll.md): work log
+- [CHANGELOG.md](CHANGELOG.md): change history
 
 ## Open Topics
 
-Currently most relevant:
+- preferred train: the controller connects to the first DUPLO train it finds; storing a preferred train only matters with several trains nearby
+- controller battery monitoring: needs a hardware addition (voltage divider from the battery to a free ADC pin); the current voltage warning is about the train's battery
 
-- further facade consolidation through `myLegoHub`
-- potential pairing/preference logic for a preferred train
-- hardware-level controller battery monitoring
-
-The detailed work list is in [ToDo.md](ToDo.md).
+Further items go into [ToDo.md](ToDo.md).
