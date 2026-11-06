@@ -72,7 +72,7 @@ ONLY ON ESP32-S3 DEVKITC-1 WITH DUAL CORE
 #include "esp_sleep.h"
 #include "esp_system.h"
 
-#include <ESP32RotaryEncoder.h>
+#include "PcntEncoder.h"
 
 #include <atomic>
 
@@ -101,14 +101,12 @@ ONLY ON ESP32-S3 DEVKITC-1 WITH DUAL CORE
 #define ENCODER_A 12               // Encoder A pin
 #define ENCODER_B 13               // Encoder B pin
 #define ENCODER_BTN 11             // Encoder button pin
-// Quadrature edges the library needs per value change. A standard encoder produces 4 edges per
-// detent (click), so 4 = one speed step per click. Higher values make the dial LESS sensitive
-// (8 needed two clicks per step). Increase only if the encoder bounces and produces extra steps.
-#define ENCODER_STEPS_PER_DETENT 4
+// Turning direction of the dial: set to -1 if turning right/left is reversed.
+#define DIAL_DIRECTION 1
 
-// Create rotary encoder instance
-//RotaryEncoder rotaryEncoder = RotaryEncoder(ENCODER_A, ENCODER_B, RE_DEFAULT_PIN, RE_DEFAULT_PIN, ENCODER_STEPS_PER_DETENT); //, ENCODER_BTN);
-RotaryEncoder rotaryEncoder(ENCODER_A, ENCODER_B, RE_DEFAULT_PIN, RE_DEFAULT_PIN, ENCODER_STEPS_PER_DETENT); //, ENCODER_BTN);
+// Rotary encoder read by the hardware pulse counter (one speed step per click, see PcntEncoder.h).
+// The push button is handled separately (wake, stop, hold-to-sleep).
+PcntEncoder rotaryEncoder(ENCODER_A, ENCODER_B);
 
 // Onboard RGB LED
 #define DATA_PIN 48
@@ -143,9 +141,9 @@ static bool hubReady = false;
 // Last motor speed commanded by the controller (0 = stopped). Only touched from the main loop.
 static int lastSpeed = 0;
 
-// Hand-over from other execution contexts into the main loop. The encoder callback runs in the
-// esp_timer task and the connection callbacks run in the BLE task (core 0); they only set these
-// flags, all UI and state work happens in loop() on core 1.
+// Pending dial value (polled from the pulse counter in the main loop) and hand-over flags from
+// the BLE task (core 0): the connection callbacks only set these flags, all UI and state work
+// happens in loop() on core 1.
 static std::atomic<long> pendingEncoderValue{0};
 static std::atomic<bool> encoderValuePending{false};
 static std::atomic<bool> hubConnectedEventPending{false};
@@ -392,17 +390,6 @@ void handleButtons(int btn_no, bool pressed)
 #define POTI_DELAY 250
 
 /**
- * @brief Encoder callback; runs in the esp_timer task of the encoder library.
- *
- * Must stay short and non-blocking: it only hands the latest value to the main loop.
- */
-static void onEncoderTurned(long value)
-{
-    pendingEncoderValue.store(value);
-    encoderValuePending.store(true);
-}
-
-/**
  * @brief Apply the latest encoder value as train speed (main loop).
  *
  * Speed commands are rate-limited to one per `POTI_DELAY`, but the newest value is kept pending
@@ -412,6 +399,13 @@ static void onEncoderTurned(long value)
 static void processEncoder()
 {
     static unsigned long lastSpeedCommandMs = 0;
+
+    // Poll the hardware pulse counter; a changed value becomes the pending target.
+    if (rotaryEncoder.update())
+    {
+        pendingEncoderValue.store(rotaryEncoder.getEncoderValue());
+        encoderValuePending.store(true);
+    }
 
     if (!encoderValuePending.load())
     {
@@ -909,14 +903,15 @@ void setup()
     guiButtons.addButtonRange(BUTTON_SOUND, 3510, 3870); // Button 6: Sound (nominal ~3690)
     guiButtons.registerButtonCallback(handleButtons);    // Register button callback
 
-    // initialize rotary encoder and register callback
-    rotaryEncoder.setEncoderType(EncoderType::FLOATING);
-    rotaryEncoder.setBoundaries(-MAX_SPEED, MAX_SPEED, false);
+    // Initialize the rotary encoder (hardware pulse counter, polled in processEncoder()).
+    rotaryEncoder.setBoundaries(-MAX_SPEED, MAX_SPEED);
     rotaryEncoder.setStepValue(SPEED_INC);
+    rotaryEncoder.setDirection(DIAL_DIRECTION);
     rotaryEncoder.setEncoderValue(0);
-    rotaryEncoder.onTurned(&onEncoderTurned);
-    // This is where the inputs are configured and the interrupts get attached
-    rotaryEncoder.begin();
+    if (!rotaryEncoder.begin())
+    {
+        DEBUG_LOG("TrainController: ERROR - pulse counter setup for the encoder failed");
+    }
 
     // Initialize DuploHub instance
     duploHub.init();

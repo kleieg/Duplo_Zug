@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Encoder: occasional lost clicks at any speed. The dial is now read by the ESP32-S3 hardware pulse counter (`PcntEncoder`, glitch filter, polled from the main loop) instead of the interrupt-based ESP32RotaryEncoder library (removed from `lib_deps`). A click counts after 3 of its 4 edges and the reference re-aligns to the detent when the dial rests, so single lost edges no longer lose a click. `DIAL_DIRECTION` inverts the turning direction if needed.
 - When the DUPLO hub stops the motor by itself (train blocked, lifted or pressed down), the controller now resets its target speed and the knob to 0, so the next dial click starts from standstill instead of the old speed. Detection: the train was seen moving after the last speed change and then reports speed 0, at least 1 s after that change; not applied during replay.
 - Encoder: the dial skips the stop zone below `MIN_SPEED`; the first click from standstill starts the train at +/-`MIN_SPEED`, the next click down stops it (previously the first click did nothing).
 - Encoder: `ENCODER_STEPS_PER_DETENT` 8 → 4; with 8 the dial needed two clicks per speed step (the old comment had the meaning reversed).
