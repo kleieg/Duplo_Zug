@@ -937,6 +937,11 @@ void setup()
 
 #ifdef DEBUG
     Serial.begin(115200);
+    // USB-CDC serial: on battery (no USB host) output is never read. Never block on it:
+    // a write waits at most 2 ms for buffer space (a reading host drains it much faster),
+    // and Serial.flush() must not be used at all (in this Arduino-ESP32 version it waits
+    // until a host has read everything, so without USB it hangs forever).
+    Serial.setTxTimeoutMs(2);
     delay(1000);
 
     SerialMUTEX();
@@ -1381,9 +1386,8 @@ void esp_goto_sleep()
     configureEncoderButtonWakeup(true);
 
     DEBUG_LOG("TrainController: ENCODER_BTN level before sleep=%d", digitalRead(ENCODER_BTN));
-#ifdef DEBUG
-    Serial.flush();
-#endif
+    // No Serial.flush() here: without a USB host it waits forever (see setup()). The ~800 ms
+    // sleep indication below gives pending log output time to go out when a host is connected.
     indicateEnteringSleep();
 
     if (encoderButtonIsRtcWakeCapable())

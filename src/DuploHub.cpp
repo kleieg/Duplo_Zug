@@ -172,7 +172,6 @@ void DuploHub::initFreeRTOS()
     }
 
     DEBUG_LOG("DuploHub: FreeRTOS objects initialized");
-    Serial.flush();
 }
 
 /**
@@ -209,7 +208,6 @@ void DuploHub::cleanupFreeRTOS()
     }
 
     DEBUG_LOG("DuploHub: FreeRTOS objects cleaned up");
-    Serial.flush();
 }
 
 /**
@@ -955,7 +953,6 @@ void DuploHub::bleTaskWrapper(void *parameter)
 void DuploHub::bleTaskFunction()
 {
     DEBUG_LOG("BLE Task: Started successfully");
-    Serial.flush();
 
     unsigned long lastConnectionCheck = 0;
     const unsigned long CONNECTION_CHECK_INTERVAL = 1000; // Check connection every 1 second
@@ -1069,14 +1066,12 @@ void DuploHub::updateBLE()
         {
             wasEverConnected = true;
             DEBUG_LOG("BLE Task: Connected to HUB");
-            Serial.flush();
             DEBUG_LOG("BLE Task: Hub address: %s", hub.getHubAddress().toString().c_str());
             DEBUG_LOG("BLE Task: Hub name: %s", hub.getHubName().c_str());
         }
         else
         {
             DEBUG_LOG("BLE Task: Failed to connect to HUB");
-            Serial.flush();
         }
     }
 

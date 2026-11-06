@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Controller hung at boot on battery (steady yellow LED, no function): `Serial.flush()` on the USB-CDC serial waits until a USB host has read all output, which never happens without USB. All `Serial.flush()` calls removed; serial writes wait at most 2 ms. Present since debug output was enabled in `TrainController.cpp` (faa0fb4).
 - Encoder: occasional lost clicks at any speed. The dial is now read by the ESP32-S3 hardware pulse counter (`PcntEncoder`, glitch filter, polled from the main loop) instead of the interrupt-based ESP32RotaryEncoder library (removed from `lib_deps`). A click counts after 3 of its 4 edges and the reference re-aligns to the detent when the dial rests, so single lost edges no longer lose a click. `DIAL_DIRECTION` inverts the turning direction if needed.
 - When the train stands still although a speed is set, the controller resets its target speed and the knob to 0, so the next dial click starts from standstill instead of the old speed:
   - the DUPLO hub stopped the motor (train blocked, lifted, pressed down): reset immediately on the speed sensor's 0 report, unless the controller expected that report because its own command passes through 0 (direction change while moving, GREEN/BLUE bricks);
