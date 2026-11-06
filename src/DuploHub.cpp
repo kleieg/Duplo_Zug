@@ -66,6 +66,10 @@ namespace
     // After connecting, the hub announces its built-in devices one by one. A device must be
     // announced before it can be activated (Legoino silently ignores unknown ports).
     constexpr uint32_t DEVICE_ATTACH_TIMEOUT_MS = 2000;
+    // Pause after each device activation (port setup), once per connection. The hub drops a port
+    // setup that arrives too soon after the previous one (seen on hardware: color and speed
+    // sensor stayed silent with 20 ms spacing, only the later voltage sensor worked).
+    constexpr uint32_t ACTIVATION_PACING_MS = 200;
     constexpr uint32_t BLE_TASK_WDT_TIMEOUT_S = 15;    // task watchdog timeout for the BLE task
     constexpr UBaseType_t COMMAND_QUEUE_LENGTH = 10;   // main loop -> BLE task
     constexpr UBaseType_t RESPONSE_QUEUE_LENGTH = 100; // BLE task -> main loop (sensor bursts)
@@ -1264,7 +1268,12 @@ void DuploHub::processCommandQueue(TickType_t firstWait)
             break;
         }
 
-        delay(COMMAND_PACING_MS);
+        const bool isActivation = (cmd.type == CommandType::CMD_ACTIVATE_RGB_LIGHT ||
+                                   cmd.type == CommandType::CMD_ACTIVATE_BASE_SPEAKER ||
+                                   cmd.type == CommandType::CMD_ACTIVATE_COLOR_SENSOR ||
+                                   cmd.type == CommandType::CMD_ACTIVATE_SPEED_SENSOR ||
+                                   cmd.type == CommandType::CMD_ACTIVATE_VOLTAGE_SENSOR);
+        delay(isActivation ? ACTIVATION_PACING_MS : COMMAND_PACING_MS);
     }
 }
 

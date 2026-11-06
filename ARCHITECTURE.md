@@ -27,7 +27,7 @@ The implementation emphasizes low perceived latency:
 
 ### Queue model
 
-- `commandQueue` (10 entries): main loop to BLE task; the BLE task waits on it (no polling), so a command goes out immediately; every hub write is followed by a 20 ms pause, and a write the BLE stack rejects (no free buffer) is retried in `Lpf2Hub::WriteValue()` instead of being lost
+- `commandQueue` (10 entries): main loop to BLE task; the BLE task waits on it (no polling), so a command goes out immediately; every hub write is followed by a 20 ms pause (200 ms after the one-time device activations at connect, which the hub drops if they come too fast), and a write the BLE stack rejects (no free buffer) is retried in `Lpf2Hub::WriteValue()` instead of being lost
 - `responseQueue` (100 entries): BLE task to main loop (sensor events)
 
 ### Shared synchronization
