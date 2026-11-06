@@ -108,7 +108,11 @@ int myLegoHub::MapSpeedometer(int rawSpeed, int maxRawSpeed)
 {
     // Define thresholds for practical speed ranges
     const int MIN_PRACTICAL_SPEED = -maxRawSpeed;
-    const int DEAD_ZONE = 10;  // Small values considered as stopped
+    // Small values considered as stopped. Kept equal to DuploHub's SPEED_THRESHOLD (5): reports
+    // only arrive for changes > 5, so any reading <= 5 means standing, and a train that stops from
+    // a reported movement (>= 6) always produces a 0 report. A larger dead zone would report a
+    // slowly starting train as 0 (the controller treats an unexpected 0 as "train stopped").
+    const int DEAD_ZONE = 5;
     // Handle dead zone (near zero speeds)
     if (abs(rawSpeed) <= DEAD_ZONE) {
         return 0;

@@ -389,6 +389,75 @@ void handleButtons(int btn_no, bool pressed)
 #define SPEED_INC 5
 #define POTI_DELAY 250
 
+// --- Keeping the target speed in sync with a train that stopped by itself ---------------------
+// The DUPLO hub cuts the motor by itself when the train is blocked, lifted or pressed down. The
+// speed sensor then reports 0. Such a report while a target speed is set resets the target to 0
+// immediately, unless the controller itself caused a pass through 0 (direction change, stop and
+// restart) and therefore expected it. A train that never starts sends no report at all; that case
+// is caught by a start timeout.
+
+// A drive command from standstill must produce a movement report within this time.
+#define START_TIMEOUT_MS 1000
+// An expected pass-through-0 report that never arrives is forgotten after this time.
+#define EXPECT_ZERO_TIMEOUT_MS 1500
+
+static bool speedSensorSeen = false;           ///< sensor has reported at least once (it works)
+static bool expectZeroReport = false;          ///< next 0 report is caused by our own command
+static unsigned long expectZeroSinceMs = 0;    ///< when the expectation was set
+static unsigned long startPendingSinceMs = 0;  ///< 0 = not waiting for the train to start moving
+static int lastDriveDirection = 0;             ///< sign of the last non-zero target (+1/-1)
+
+/**
+ * @brief Record a new non-zero target speed and what the speed sensor should report next.
+ *
+ * Call right before commanding a non-zero speed (dial, color bricks).
+ *
+ * @param newTarget Target speed being commanded (0 is ignored).
+ * @param stopsFirst `true` if the command sequence stops the motor before driving on (BLUE/GREEN
+ *        bricks), so a moving train passes through 0 even without a direction change.
+ */
+static void noteTargetSpeed(int newTarget, bool stopsFirst = false)
+{
+    if (newTarget == 0)
+    {
+        return;
+    }
+
+    const int newDirection = (newTarget > 0) ? 1 : -1;
+    const bool moving = (detectedSpeed != 0);
+    const bool reversing = (lastDriveDirection != 0 && newDirection != lastDriveDirection);
+    lastDriveDirection = newDirection;
+
+    if (moving && (reversing || stopsFirst))
+    {
+        // The train will slow down through 0 before driving on: ignore that one 0 report.
+        expectZeroReport = true;
+        expectZeroSinceMs = millis();
+        startPendingSinceMs = 0;
+    }
+    else if (!moving)
+    {
+        // Starting from standstill: movement must be reported within START_TIMEOUT_MS.
+        expectZeroReport = false;
+        startPendingSinceMs = millis();
+    }
+    // Moving and continuing in the same direction: nothing special to expect.
+}
+
+/**
+ * @brief Reset target speed and knob to 0 after the train stopped by itself.
+ */
+static void resetTargetBecauseTrainStopped(const char *reason)
+{
+    DEBUG_LOG("TrainController: Train %s - target %d reset to 0", reason, lastSpeed);
+    duploHub.stopMotor();
+    lastSpeed = 0;
+    expectZeroReport = false;
+    startPendingSinceMs = 0;
+    rotaryEncoder.setEncoderValue(0);
+    encoderValuePending.store(false);
+}
+
 /**
  * @brief Apply the latest encoder value as train speed (main loop).
  *
@@ -453,6 +522,7 @@ static void processEncoder()
         return;
     }
 
+    noteTargetSpeed(newSpeed);
     duploHub.setMotorSpeed(newSpeed);
     lastSpeed = newSpeed;
     lastSpeedCommandMs = millis();
@@ -505,6 +575,7 @@ static void detectedColorCb(DuploEnums::DuploColor color)
         duploHub.setLedColor(DuploEnums::DuploColor::GREEN);
         statusLed.setColor(CRGB::Green);
         statusLed.setBlinking(true, 250, 250, 3);
+        noteTargetSpeed(reverseSpeed, true); // stop + reverse passes through 0
         duploHub.stopMotor();
         duploHub.setMotorSpeed(reverseSpeed);
         lastSpeed = reverseSpeed;
@@ -526,6 +597,7 @@ static void detectedColorCb(DuploEnums::DuploColor color)
         duploHub.setLedColor(DuploEnums::DuploColor::BLUE);
         statusLed.setColor(CRGB::Blue);
         statusLed.setBlinking(true, 250, 250, 3);
+        noteTargetSpeed(lastSpeed, true); // stop, water, continue: may pass through 0
         duploHub.stopMotor();
         duploHub.playSound((DuploEnums::DuploSound::WATER_REFILL)); // Play water refill sound
         duploHub.setMotorSpeed(lastSpeed);                          // Restore the last speed
@@ -572,19 +644,13 @@ static void detectedVoltageCb(float voltage)
     detectedVoltage = voltage;
 }
 
-// A target speed != 0 while the train stands still for this long resets the target to 0
-// (train blocked, lifted, pressed down, or never got going). Covers start-up and passing
-// through 0 when the direction changes.
-#define STALL_RESET_MS 1000
-
-// `true` once the speed sensor has reported at least once (proves it works on this train).
-static bool speedSensorSeen = false;
-
 /**
  * @brief Callback for detected speed events from the speed sensor.
  *
- * The sensor only reports changes, so `detectedSpeed` holds the last reported value
- * (non-zero while driving at constant speed, 0 after the train stopped).
+ * The sensor only reports changes, so `detectedSpeed` holds the last reported value (non-zero
+ * while driving at constant speed, 0 after the train stopped). A 0 report while a target speed is
+ * set means the hub stopped the train by itself (blocked, lifted, pressed down) and resets the
+ * target immediately, unless our own command caused it (see `noteTargetSpeed()`).
  *
  * @param speed The detected speed value (normalized, 0 = stopped).
  */
@@ -593,49 +659,55 @@ static void detectedSpeedCb(int speed)
     DEBUG_LOG("TrainController:  Detected Speed: %d", speed);
     detectedSpeed = speed;
     speedSensorSeen = true;
+
+    if (speed != 0)
+    {
+        startPendingSinceMs = 0; // the train is moving
+        return;
+    }
+
+    if (!hubReady || replay || lastSpeed == 0)
+    {
+        return;
+    }
+
+    if (expectZeroReport)
+    {
+        // Our own pass through 0 (direction change, stop and restart): now it has to start again.
+        expectZeroReport = false;
+        startPendingSinceMs = millis();
+        return;
+    }
+
+    resetTargetBecauseTrainStopped("stopped by itself (blocked/lifted)");
 }
 
 /**
- * @brief Keep the target speed in sync with a train that stands still (main loop).
+ * @brief Time-based part of the stop sync (main loop): a train that never starts sends no report.
  *
- * The DUPLO hub cuts the motor by itself when the train is blocked, lifted or pressed down, and a
- * blocked train may never get going. If the target is not 0 but the train has been standing for
- * `STALL_RESET_MS` since the target was last changed, a stop is sent and target and knob are reset
- * to 0, so the next dial click starts from standstill. Only active once the speed sensor has
- * reported at least once (otherwise every drive command would be cut off), and not during replay.
+ * Resets the target if a drive command from standstill produced no movement report within
+ * `START_TIMEOUT_MS` (only once the speed sensor has proven to work), and forgets an expected
+ * pass-through-0 report that never arrived.
  */
 static void checkTrainStalled()
 {
-    static int observedTarget = 0;
-    static unsigned long standingSinceMs = 0;
+    if (!hubReady || replay || lastSpeed == 0)
+    {
+        expectZeroReport = false;
+        startPendingSinceMs = 0;
+        return;
+    }
 
     const unsigned long now = millis();
-    const bool standingWithTarget = hubReady && speedSensorSeen && !replay && lastSpeed != 0 && detectedSpeed == 0;
 
-    if (!standingWithTarget)
+    if (expectZeroReport && now - expectZeroSinceMs >= EXPECT_ZERO_TIMEOUT_MS)
     {
-        standingSinceMs = 0;
-        observedTarget = lastSpeed;
-        return;
+        expectZeroReport = false; // the sensor skipped the 0; the train is moving on
     }
 
-    // Start (or restart after a new target) the stall timer.
-    if (standingSinceMs == 0 || lastSpeed != observedTarget)
+    if (startPendingSinceMs != 0 && speedSensorSeen && now - startPendingSinceMs >= START_TIMEOUT_MS)
     {
-        standingSinceMs = now;
-        observedTarget = lastSpeed;
-        return;
-    }
-
-    if (now - standingSinceMs >= STALL_RESET_MS)
-    {
-        DEBUG_LOG("TrainController: Train stands still (blocked/lifted/not starting) - target %d reset to 0", lastSpeed);
-        duploHub.stopMotor();
-        lastSpeed = 0;
-        observedTarget = 0;
-        standingSinceMs = 0;
-        rotaryEncoder.setEncoderValue(0);
-        encoderValuePending.store(false);
+        resetTargetBecauseTrainStopped("did not start (blocked)");
     }
 }
 

@@ -20,7 +20,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Fixed
 
 - Encoder: occasional lost clicks at any speed. The dial is now read by the ESP32-S3 hardware pulse counter (`PcntEncoder`, glitch filter, polled from the main loop) instead of the interrupt-based ESP32RotaryEncoder library (removed from `lib_deps`). A click counts after 3 of its 4 edges and the reference re-aligns to the detent when the dial rests, so single lost edges no longer lose a click. `DIAL_DIRECTION` inverts the turning direction if needed.
-- When the train stands still although a speed is set (the DUPLO hub stopped the motor because the train was blocked, lifted or pressed down, or a blocked train never got going), the controller resets its target speed and the knob to 0 after 1 s (`STALL_RESET_MS`), so the next dial click starts from standstill instead of the old speed. Each new target restarts the 1 s; only active once the speed sensor has reported at least once; not applied during replay.
+- When the train stands still although a speed is set, the controller resets its target speed and the knob to 0, so the next dial click starts from standstill instead of the old speed:
+  - the DUPLO hub stopped the motor (train blocked, lifted, pressed down): reset immediately on the speed sensor's 0 report, unless the controller expected that report because its own command passes through 0 (direction change while moving, GREEN/BLUE bricks);
+  - a train that never starts (blocked from standstill) sends no report: reset if no movement is reported within 1 s (`START_TIMEOUT_MS`), once the speed sensor has proven to work;
+  - not applied during replay. Speed readings up to 5 now count as standing (was 10), matching the sensor's reporting threshold, so a slowly starting train is not reported as 0.
 - Encoder: the dial skips the stop zone below `MIN_SPEED`; the first click from standstill starts the train at +/-`MIN_SPEED`, the next click down stops it (previously the first click did nothing).
 - Encoder: `ENCODER_STEPS_PER_DETENT` 8 → 4; with 8 the dial needed two clicks per speed step (the old comment had the meaning reversed).
 - Buttons: averaging/settling reduced from 10 to 3 samples, so a press registers after ~0.12-0.15 s instead of ~0.5 s.
