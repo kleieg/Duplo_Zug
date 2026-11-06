@@ -113,28 +113,15 @@ bool DuploHub::ensureColorTimerInitialized()
 /**
  * @brief Default constructor for DuploHub.
  *
- * Initializes the DuploHub instance with the default motor port and resets all state variables.
+ * Resets all state variables. The motor is always driven on the DUPLO `MOTOR` port.
  */
-DuploHub::DuploHub() : motorPort((byte)DuploEnums::DuploTrainHubPort::MOTOR), wasConnected(false), hubMACAddress(""),
+DuploHub::DuploHub() : hubMACAddress(""),
                        connectionState(false), connectingState(false),
-                       connectionMutex(nullptr), commandQueue(nullptr), bleTaskHandle(nullptr),
+                       connectionMutex(nullptr), commandQueue(nullptr), responseQueue(nullptr),
+                       bleTaskHandle(nullptr),
                        onConnectedCallback(nullptr), onDisconnectedCallback(nullptr),
                        detectedColorCallback(nullptr), detectedSpeedCallback(nullptr),
                        detectedVoltageCallback(nullptr)
-{
-    instance = this; // Set static instance pointer
-}
-
-/**
- * @brief Constructor for DuploHub with a specific motor port.
- * @param port The port number to use for the motor.
- */
-DuploHub::DuploHub(byte port) : motorPort(port), wasConnected(false), hubMACAddress(""),
-                                connectionState(false), connectingState(false),
-                                connectionMutex(nullptr), commandQueue(nullptr), bleTaskHandle(nullptr),
-                                onConnectedCallback(nullptr), onDisconnectedCallback(nullptr),
-                                detectedColorCallback(nullptr), detectedSpeedCallback(nullptr),
-                                detectedVoltageCallback(nullptr)
 {
     instance = this; // Set static instance pointer
 }
@@ -373,23 +360,13 @@ void DuploHub::replayCommands()
             commandBuffer[i].timestamp -= originalStartTime; // Normalize to start at 0
         }
 
-        // Calculate total sequence duration (time of last command + some buffer)
-        if (commandBufferCount > 1)
-        {
-            sequenceDuration = commandBuffer[commandBufferCount - 1].timestamp + 1000000; // Add 1 second buffer
-        }
-        else
-        {
-            sequenceDuration = 1000000; // Default 1 second for single command
-        }
-
-        DEBUG_LOG("DuploHub: Normalized %zu commands. Sequence duration: %lld us", commandBufferCount, sequenceDuration);
+        DEBUG_LOG("DuploHub: Normalized %zu commands. Sequence duration: %lld us", commandBufferCount,
+                  commandBuffer[commandBufferCount - 1].timestamp);
     }
 
     // Initialize replay state
     replaying = true;
     replayIndex = 0;
-    replayCycle = 0;
     replayStartTime = esp_timer_get_time();
 
     DEBUG_LOG("DuploHub: Started replay of %zu recorded commands. Use getNextReplayCommand() to retrieve commands.", commandBufferCount);
@@ -454,12 +431,10 @@ void DuploHub::stopReplay()
 {
     if (replaying)
     {
-        DEBUG_LOG("DuploHub: Stopping replay at command %zu/%zu, cycle %d", replayIndex, commandBufferCount, replayCycle + 1);
+        DEBUG_LOG("DuploHub: Stopping replay at command %zu/%zu", replayIndex, commandBufferCount);
         replaying = false;
         replayIndex = 0;
-        replayCycle = 0;
         replayStartTime = 0;
-        sequenceDuration = 0;
     }
     else
     {
@@ -519,9 +494,7 @@ void DuploHub::setHubName(const char *name)
     }
     else
     {
-        char hubName[strlen(name) + 1];
-        strcpy(hubName, name);
-        hub.setHubName(hubName);
+        DEBUG_LOG("ERROR: Command queue is not initialized");
     }
 }
 
@@ -565,8 +538,7 @@ void DuploHub::setMotorSpeed(int speed)
     }
     else
     {
-        hub.setBasicMotorSpeed(motorPort, speed);
-        DEBUG_LOG("DuploHub: setBasicMotorSpeed executed at: %lu", millis());
+        DEBUG_LOG("ERROR: Command queue is not initialized");
     }
 }
 
@@ -586,7 +558,7 @@ void DuploHub::stopMotor()
     }
     else
     {
-        hub.stopBasicMotor(motorPort);
+        DEBUG_LOG("ERROR: Command queue is not initialized");
     }
 }
 
@@ -939,25 +911,6 @@ void DuploHub::staticVoltageSensorCallback(void *hub, byte portNumber, DeviceTyp
 }
 
 /**
- * @brief Set the motor port for the hub.
- * @param port The port number to assign to the motor.
- */
-void DuploHub::setMotorPort(byte port)
-{
-    motorPort = port;
-}
-
-/**
- * @brief Get the current motor port number.
- * @return The port number assigned to the motor.
- */
-
-byte DuploHub::getMotorPort()
-{
-    return motorPort;
-}
-
-/**
  * @brief List all device ports for the Duplo Train hub.
  */
 void DuploHub::listDevicePorts()
@@ -1073,19 +1026,6 @@ void DuploHub::stopBLETask()
 bool DuploHub::isBLETaskRunning()
 {
     return bleTaskHandle != nullptr;
-}
-
-/**
- * @brief Ensure the BLE task is running; restart if not (auto-recovery).
- */
-void DuploHub::ensureBLETaskRunning()
-{
-    if (!isBLETaskRunning())
-    {
-        DEBUG_LOG("DuploHub: BLE task not running, attempting to restart...");
-        delay(200);
-        startBLETask();
-    }
 }
 
 /**
@@ -1454,22 +1394,6 @@ void DuploHub::processResponseQueue()
             break;
         }
     }
-}
-
-/**
- * @brief Main update method; ensures BLE task is running and updates connection state.
- */
-void DuploHub::update()
-{
-    // Ensure BLE task is running (auto-recovery)
-    static unsigned long lastTaskCheck = 0;
-    if (millis() - lastTaskCheck > 5000)
-    { // Check every 5 seconds
-        ensureBLETaskRunning();
-        lastTaskCheck = millis();
-    }
-    // No connection state change or callback logic here anymore; handled in BLE task
-    wasConnected = isConnected();
 }
 
 /**

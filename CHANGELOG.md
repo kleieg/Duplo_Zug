@@ -25,6 +25,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Removed
 
+- Removed `DuploHub::update()` and `ensureBLETaskRunning()` (uncalled since the July 2025 refactoring; the handle check could never detect a hung or crashed BLE task).
+- Removed unused `wasConnected`, `replayCycle`, `sequenceDuration`, the `DuploHub(byte port)` constructor, `setMotorPort()`/`getMotorPort()` (the motor always uses the DUPLO `MOTOR` port) and the never-implemented `playSoundDirect()` declaration.
+- Removed unreachable, non-thread-safe direct-hub fallbacks for a missing command queue; they now log an error like the other commands.
 - Removed unused globals and dead callback paths in `TrainController`.
 - Removed unimplemented low-level API declarations from `DuploHub` header.
 
@@ -192,6 +195,9 @@ The 2.0.0 release introduces breaking changes due to the multi-task architecture
        // ... application logic (no direct BLE calls)
    }
    ```
+
+   > Note (later versions): `DuploHub::update()` has been removed. The BLE task handles connection
+   > state and callbacks on its own; `loop()` only calls `processResponseQueue()`.
 
 3. **Thread-safe commands** (automatically handled by backward compatibility):
    ```cpp

@@ -120,9 +120,7 @@ class DuploHub
 {
 private:
     myLegoHub hub;                     ///< Underlying DUPLO/Legoino adapter instance.
-    byte motorPort;                    ///< Configured motor port used for drive commands.
     std::string hubMACAddress;         ///< Optional preferred hub address for reconnects.
-    bool wasConnected;                 ///< Historical marker for connection-dependent behavior.
     static DuploHub *instance;         ///< Singleton-style back-reference for static callbacks.
     volatile bool connectionState;     ///< Cached connection state shared with the main loop.
     volatile bool connectingState;     ///< Cached scan/connect-in-progress state.
@@ -142,8 +140,6 @@ private:
     size_t replayIndex = 0;             ///< Index of the next replay command.
     int64_t replayStartTime = 0;        ///< Timestamp when the current replay run started.
     int64_t originalStartTime = 0;      ///< Timestamp of the first recorded command before normalization.
-    int64_t sequenceDuration = 0;       ///< Total replay sequence duration after normalization.
-    int replayCycle = 0;                ///< Reserved replay cycle counter for future looped replay modes.
     bool recordCommandsEnabled = false; ///< `true` while outgoing commands are captured for replay.
 
     // Sleep handshake between the main loop and the BLE task.
@@ -227,11 +223,6 @@ private:
      */
     void updateBLE();
 
-    /**
-     * @brief Ensure the BLE task is alive before queuing work.
-     */
-    void ensureBLETaskRunning();
-
 protected:
     // Sensor callback registration for lpf2hub
     /**
@@ -286,12 +277,6 @@ public:
      * @brief Default constructor.
      */
     DuploHub();
-
-    /**
-     * @brief Constructor with motor port selection.
-     * @param port Motor port.
-     */
-    DuploHub(byte port);
 
     /**
      * @brief Destructor (cleans up FreeRTOS objects).
@@ -355,18 +340,6 @@ public:
      * @brief List all device ports.
      */
     void listDevicePorts();
-
-    /**
-     * @brief Set the motor port.
-     * @param port Motor port.
-     */
-    void setMotorPort(byte port);
-
-    /**
-     * @brief Get the configured motor port.
-     * @return Motor port.
-     */
-    byte getMotorPort();
 
     /**
      * @brief Enable or disable command recording for replay functionality.
@@ -442,12 +415,6 @@ public:
     void setLedColor(DuploEnums::DuploColor color);
 
     /**
-     * @brief Play a sound directly (low-level).
-     * @param sound Sound ID.
-     */
-    void playSoundDirect(byte sound);
-
-    /**
      * @brief Activate color sensor (legacy method).
      */
     void activateColorSensor();
@@ -512,11 +479,6 @@ public:
      * @brief Process response queue events in main task.
      */
     void processResponseQueue();
-
-    /**
-     * @brief BLE task event processing (call in main loop).
-     */
-    void update();
 };
 
 #endif // DUPLO_HUB_H
