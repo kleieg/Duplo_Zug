@@ -385,8 +385,8 @@ void handleButtons(int btn_no, bool pressed)
 // Speed range of the dial. Below MIN_SPEED the DUPLO motor barely moves, so the dial skips that
 // zone: from standstill the first click jumps to +/-MIN_SPEED, the next click down returns to 0.
 // Raise MIN_SPEED if the train does not start reliably at the first click.
-// 20 = measured minimum on the current train (10 did not move it).
-#define MIN_SPEED 20
+// 25 = measured minimum on the current train (10 and 20 did not move it reliably).
+#define MIN_SPEED 25
 #define MAX_SPEED 100
 #define SPEED_INC 5
 #define POTI_DELAY 250
