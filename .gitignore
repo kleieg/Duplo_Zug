@@ -5,6 +5,7 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+.claude/
 
 # KiCad auto-generated backups (history is kept in git)
 *-backups/
