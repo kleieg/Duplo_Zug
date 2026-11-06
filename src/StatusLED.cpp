@@ -19,7 +19,7 @@
  * @brief Construct a status LED controller with default idle state.
  * @param pin GPIO connected to the RGB LED data line.
  */
-StatusLED::StatusLED(int pin) : _pin(pin), _color(CRGB::Black), _pattern(0), _blinking(false), _interval(500), _ontime(200), _blinkTimes(-1), _currentBlinks(0), _lastWasOn(false), _lastUpdate(0), _initialized(false), _dirty(true)
+StatusLED::StatusLED(int pin) : _pin(pin), _color(CRGB::Black), _pattern(0), _blinking(false), _interval(500), _ontime(200), _blinkTimes(-1), _lastUpdate(0), _initialized(false), _dirty(true)
 {
     _leds[0] = CRGB::Black;
 }
@@ -91,6 +91,15 @@ void StatusLED::setBrightness(int val)
 }
 
 /**
+ * @brief Report whether a finite blink burst is still playing.
+ * @return `true` while a burst started with `times > 0` has not finished yet.
+ */
+bool StatusLED::isBurstActive() const
+{
+    return _blinking && _blinkTimes > 0;
+}
+
+/**
  * @brief Switch the LED off and cancel any active blink pattern.
  */
 void StatusLED::setOff()
@@ -134,8 +143,13 @@ void StatusLED::update()
         return;
     }
 
-    // Check if finite blinking is complete
-    if (_blinkTimes > 0 && _currentBlinks >= _blinkTimes)
+    unsigned long currentTime = millis();
+    unsigned long elapsed = currentTime - _lastUpdate;
+    unsigned long cycleTime = _ontime + _interval;
+
+    // A finite burst ends after `_blinkTimes` complete on/off cycles, so the last blink is
+    // shown for its full on-time.
+    if (_blinkTimes > 0 && elapsed >= (unsigned long)_blinkTimes * cycleTime)
     {
         // Finite blinking is complete, stop blinking and turn LED off
         _blinking = false;
@@ -147,22 +161,8 @@ void StatusLED::update()
         return;
     }
 
-    unsigned long currentTime = millis();
-    unsigned long elapsed = currentTime - _lastUpdate;
-
-    // Calculate the position in the blink cycle
-    unsigned long cycleTime = _ontime + _interval;
-    unsigned long cyclePosition = elapsed % cycleTime;
-
-    // Check if we've completed a full cycle to increment blink counter
-    bool currentlyOn = (cyclePosition < _ontime);
-
-    // Detect transition from off to on (start of new blink)
-    if (currentlyOn && !_lastWasOn && _blinkTimes > 0)
-    {
-        _currentBlinks++;
-    }
-    _lastWasOn = currentlyOn;
+    // Position in the blink cycle decides between on and off phase
+    bool currentlyOn = ((elapsed % cycleTime) < (unsigned long)_ontime);
 
     if (currentlyOn)
     {
@@ -203,9 +203,7 @@ void StatusLED::setBlinking(bool blinking, int ontime, int interval, int times)
     _ontime = ontime;
     _interval = interval;
     _blinkTimes = times;
-    _currentBlinks = 0; // Reset blink counter
-    _lastWasOn = false; // Reset state tracking
-    _lastUpdate = millis();
+    _lastUpdate = millis(); // Blink cycle origin
     _dirty = true;
 
     if (!_blinking && _initialized)

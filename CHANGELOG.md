@@ -12,6 +12,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Status LED bursts showed the last blink for only one loop cycle (~20 ms); bursts now run for N full on/off cycles.
+- PLAY with an empty recording no longer leaves the controller in a stuck "replay" state (buttons locked, no sleep).
+- Fast blue upload-mode blinking no longer continues after the upload window closes.
 - Encoder: fast knob turns no longer get lost; speed commands are still rate-limited (250 ms) but the latest value is always applied, so train speed matches the knob.
 - Encoder: callback (esp_timer task) no longer blocks with `delay()` or touches app state; handling moved to the main loop.
 - Sleep: before entering sleep the controller ends record/replay, stops the motor and actively disconnects the hub; a running replay counts as activity.
@@ -22,6 +25,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- Status LED: steady red now means emergency stop only; the RED track brick shows a 3x red burst. A single `updateModeIndication()` shows the current mode (emergency stop, replay, recording, initializing) whenever no burst plays, so the emergency-stop indication is restored after disconnect, wake, low-voltage or tile bursts. Heartbeat and low-voltage bursts wait instead of cutting off other bursts.
+- RECORD and PLAY are ignored during emergency stop.
+- Emergency stop (button and RED brick) queues the motor stop before the brake sound and train LED, so the train stops ~400 ms earlier.
 - `DuploHub`: one `queueCommand()` helper for all commands; replay re-queues the recorded command via `replayCommand()` instead of a duplicated switch in `TrainController`.
 - `TrainController`: removed blocking `delay()` calls from button and color handlers (the BLE task paces hub writes); hub name is the `HUB_NAME` constant; sound button cycle starts with HORN.
 - `ADCButtons`: sampling state is per instance, single `ensureCapacity()` resize routine, sample buffer sized from the validated sample count.

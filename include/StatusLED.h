@@ -64,6 +64,12 @@ public:
      */
     void setOff();
 
+    /**
+     * @brief Report whether a finite blink burst is still playing.
+     * @return `true` while a burst started with `times > 0` has not finished yet.
+     */
+    bool isBurstActive() const;
+
 private:
     int _pin;                  ///< GPIO used by the NeoPixel-compatible status LED.
     CRGB _leds[1];             ///< Backing FastLED buffer for the single on-board LED.
@@ -73,8 +79,6 @@ private:
     int _interval;             ///< Off-time in milliseconds between blink pulses.
     int _ontime;               ///< On-time in milliseconds for each blink pulse.
     int _blinkTimes;           ///< Number of requested blinks, or `-1` for continuous blinking.
-    int _currentBlinks;        ///< Number of completed on-phases in the current blink sequence.
-    bool _lastWasOn;           ///< Tracks the previous phase to count finite blinks correctly.
     unsigned long _lastUpdate; ///< Timestamp used as the blink cycle origin.
     bool _initialized;         ///< Indicates whether FastLED has already been configured.
     bool _dirty;               ///< Prevents redundant hardware refreshes when visible state is unchanged.

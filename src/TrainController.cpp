@@ -296,6 +296,13 @@ void handleButtons(int btn_no, bool pressed)
         return;
     }
 
+    // During emergency stop, record and replay are locked; STOP releases the stop first.
+    if (emergencyStop && (btn_no == BUTTON_RECORD || btn_no == BUTTON_PLAY))
+    {
+        DEBUG_LOG("TrainController: Ignoring button %d during emergency stop", btn_no);
+        return;
+    }
+
     switch (btn_no)
     {
     case BUTTON_SOUND:
@@ -324,15 +331,12 @@ void handleButtons(int btn_no, bool pressed)
         if (recording)
         {
             DEBUG_LOG("TrainController: Recording started");
-            statusLed.setColor(CRGB::Purple); // Blink purple when recording
-            statusLed.setBlinking(true, 500, 1000);
             duploHub.recordCommands(true); // Start recording commands
         }
         else
         {
             DEBUG_LOG("TrainController: Recording stopped");
             duploHub.recordCommands(false); // Stop recording commands
-            statusLed.setOff();             // LED off when recording stops
         }
         break;
     case BUTTON_PLAY:
@@ -349,10 +353,8 @@ void handleButtons(int btn_no, bool pressed)
             return; // Ignore playback if recording is active
         }
         duploHub.replayCommands();
-        statusLed.setColor(CRGB::Yellow); // Blink yellow during replay
-        statusLed.setBlinking(true, 500, 1000);
-        replay = true; // Set replay mode
-        DEBUG_LOG("TrainController: Playback started");
+        replay = duploHub.isReplayActive(); // stays false if nothing was recorded
+        DEBUG_LOG("TrainController: Playback %s", replay ? "started" : "skipped (nothing recorded)");
         break;
     case BUTTON_STOP:
         // If replay is active, stop replay and playback immediately
@@ -373,11 +375,10 @@ void handleButtons(int btn_no, bool pressed)
         emergencyStop = !emergencyStop; // Toggle emergency stop state
         if (emergencyStop)
         {
-            statusLed.setColor(CRGB::Red); // Solid red when stop is active
-            statusLed.setBlinking(false);
+            // Stop first: sound and LED commands each hold the BLE task for ~200 ms.
+            duploHub.stopMotor();
             duploHub.playSound((DuploEnums::DuploSound::BRAKE)); // Play brake sound
             duploHub.setLedColor(DuploEnums::DuploColor::RED);
-            duploHub.stopMotor();
             lastSpeed = 0;
             rotaryEncoder.setEncoderValue(0);
             encoderValuePending.store(false); // Discard knob input that predates the stop
@@ -386,8 +387,8 @@ void handleButtons(int btn_no, bool pressed)
         {
             duploHub.playSound((DuploEnums::DuploSound::STATION_DEPARTURE)); // Play departure sound
             duploHub.setLedColor(DuploEnums::DuploColor::GREEN);             // Set LED to green
-            statusLed.setOff();                                              // LED off when stop is released
         }
+        // The controller LED follows the mode automatically (see updateModeIndication()).
         DEBUG_LOG("TrainController: Emergency stop %s", emergencyStop ? "activated" : "deactivated");
         break;
     default:
@@ -491,18 +492,18 @@ static void detectedColorCb(DuploEnums::DuploColor color)
     {
     case DuploEnums::DuploColor::BLACK:
         DEBUG_LOG("TrainController:  Detected Color: %d", DuploEnums::DuploColor::BLACK);
-        duploHub.setLedColor(DuploEnums::DuploColor::BLACK);
-        statusLed.setColor(CRGB::Black);
+        duploHub.setLedColor(DuploEnums::DuploColor::BLACK); // train light off; controller LED unchanged
         break;
 
     case DuploEnums::DuploColor::RED:
         DEBUG_LOG("TrainController:  Detected Color: %d", DuploEnums::DuploColor::RED);
-        statusLed.setColor(CRGB::Red); // Solid red when stop is active
-        statusLed.setBlinking(false);
+        // Event burst like the other tiles; steady red is reserved for the emergency stop.
+        statusLed.setColor(CRGB::Red);
+        statusLed.setBlinking(true, 250, 250, 3);
+        duploHub.stopMotor();                                // Stop first, then sound and LED
         duploHub.playSound((DuploEnums::DuploSound::BRAKE)); // Play brake sound
         duploHub.setLedColor(DuploEnums::DuploColor::RED);
-        duploHub.stopMotor();
-        lastSpeed = 0;     // a later BLUE tile must not restart the train
+        lastSpeed = 0; // a later BLUE tile must not restart the train
         rotaryEncoder.setEncoderValue(0);
         encoderValuePending.store(false);
         break;
@@ -626,9 +627,7 @@ static void onHubConnected()
     hubInitializationStep = HubInitializationStep::RegisterCallbacks;
     hubInitializationStepStartedMs = 0;
     readyHeartbeatActive = false;
-
-    statusLed.setColor(CRGB::Blue);
-    statusLed.setBlinking(true, 150, 250);
+    // Blue "initializing" blinking is shown by updateModeIndication() while init runs.
 }
 
 // Callback function when hub disconnects
@@ -782,8 +781,6 @@ void replayNextCommand()
         if (!duploHub.isReplayActive())
         {
             replay = false;
-            statusLed.setBlinking(false); // Stop blinking first
-            statusLed.setOff();           // LED off when replay ends
             DEBUG_LOG("TrainController: No more commands to replay, stopping replay");
         }
         else
@@ -970,11 +967,92 @@ static void updateReadyHeartbeat()
         lastReadyHeartbeatMs = now - READY_HEARTBEAT_INTERVAL_MS;
     }
 
-    if (now - lastReadyHeartbeatMs >= READY_HEARTBEAT_INTERVAL_MS)
+    // Never cut off another burst (tile feedback, warnings); the heartbeat simply waits.
+    if (now - lastReadyHeartbeatMs >= READY_HEARTBEAT_INTERVAL_MS && !statusLed.isBurstActive())
     {
         statusLed.setColor(CRGB::Green);
         statusLed.setBlinking(true, READY_HEARTBEAT_ON_MS, READY_HEARTBEAT_OFF_MS, READY_HEARTBEAT_BLINKS);
         lastReadyHeartbeatMs = now;
+    }
+}
+
+/**
+ * @brief Persistent controller modes shown on the status LED.
+ *
+ * Modes are continuous patterns; events (tiles, ready, warnings, disconnect) are finite bursts.
+ * A burst temporarily overrides the mode, which is restored as soon as the burst is over.
+ */
+enum class LedMode
+{
+    Unknown,       ///< Nothing applied yet / must be re-applied
+    None,          ///< No mode: LED off (ready heartbeat bursts are added separately)
+    Initializing,  ///< Hub connected, initialization running: blue blinking
+    Recording,     ///< Recording: violet blinking
+    Replay,        ///< Replay: yellow blinking
+    EmergencyStop  ///< Emergency stop: steady red
+};
+
+static LedMode shownLedMode = LedMode::Unknown;
+
+/**
+ * @brief Determine the mode the status LED should show, by priority.
+ */
+static LedMode currentLedMode()
+{
+    if (emergencyStop)
+        return LedMode::EmergencyStop;
+    if (replay)
+        return LedMode::Replay;
+    if (recording)
+        return LedMode::Recording;
+    if (hubInitializationActive)
+        return LedMode::Initializing;
+    return LedMode::None;
+}
+
+/**
+ * @brief Show the current mode on the status LED whenever no burst is playing.
+ *
+ * Single place that drives mode patterns, so a mode indication (e.g. emergency stop) can no
+ * longer be lost after a disconnect, wake or tile burst.
+ */
+static void updateModeIndication()
+{
+    if (wakeBlinkActive || statusLed.isBurstActive())
+    {
+        shownLedMode = LedMode::Unknown; // re-apply once the burst is over
+        return;
+    }
+
+    const LedMode mode = currentLedMode();
+    if (mode == shownLedMode)
+    {
+        return;
+    }
+    shownLedMode = mode;
+
+    switch (mode)
+    {
+    case LedMode::EmergencyStop:
+        statusLed.setColor(CRGB::Red); // steady
+        break;
+    case LedMode::Replay:
+        statusLed.setColor(CRGB::Yellow);
+        statusLed.setBlinking(true, 500, 1000);
+        break;
+    case LedMode::Recording:
+        statusLed.setColor(CRGB::Purple);
+        statusLed.setBlinking(true, 500, 1000);
+        break;
+    case LedMode::Initializing:
+        statusLed.setColor(CRGB::Blue);
+        statusLed.setBlinking(true, 150, 250);
+        break;
+    case LedMode::None:
+    case LedMode::Unknown:
+    default:
+        statusLed.setOff();
+        break;
     }
 }
 
@@ -1139,8 +1217,8 @@ void checkStatus(DuploHub &duploHub)
         lastStatusUpdate = millis();
     }
 
-    // Low-voltage indication is suppressed while record/replay/emergency stop own the status LED.
-    if (isLowVoltage() && !(recording || replay || emergencyStop || wakeBlinkActive) &&
+    // Low-voltage burst; the current mode (e.g. emergency stop) is restored afterwards.
+    if (isLowVoltage() && !wakeBlinkActive && !statusLed.isBurstActive() &&
         millis() - lastVoltageWarning > VOLTAGE_WARNING_INTERVAL_MS)
     {
         DEBUG_LOG("TrainController: Low voltage detected: %.2f V", detectedVoltage);
@@ -1217,8 +1295,7 @@ void loop()
     if (recording && !duploHub.isRecordingCommandsEnabled())
     {
         recording = false;
-        statusLed.setOff();
-        DEBUG_LOG("TrainController: Recording auto-stopped (record buffer full), LED turned off");
+        DEBUG_LOG("TrainController: Recording auto-stopped (record buffer full)");
     }
 
     // Finalize non-blocking wake blink and hand control back to the ready heartbeat.
@@ -1253,6 +1330,7 @@ void loop()
                     delay(100); // 10 seconds total
                 }
                 DEBUG_LOG("Upload window closed, continuing normal boot...");
+                shownLedMode = LedMode::Unknown; // end the upload blink, show the current mode
             }
         }
         else
@@ -1318,6 +1396,8 @@ void loop()
     checkStatus(duploHub);
 
     updateReadyHeartbeat();
+
+    updateModeIndication();
 
     delay(20); // Add a small delay to reduce CPU load and prevent guru meditation error
 } // End of loop

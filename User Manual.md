@@ -15,19 +15,25 @@
 - Green short pulses: ready, but currently idle
 - Violet blinking: recording active
 - Yellow blinking: playback active
-- Solid red: emergency stop active
-- White blinking: train connection was lost
+- Solid red: emergency stop active (the only steady red signal)
+- 3x red: train stopped at a red track brick
+- 5x fast red: train battery low (repeats every 30 seconds)
+- 3x white: train connection was lost
+- 3x green / blue / yellow: green / blue / yellow track brick detected
 - 5x green: controller has just woken from sleep
 
 Rule of thumb: the train is truly command-ready only when green is shown.
+Short blink bursts are events; after a burst the LED returns to the current mode
+(for example back to solid red while the emergency stop is still active).
 
 ## 3. Controls
 
 - Rotate encoder: set reverse or forward speed
 - Short encoder press: wake controller from sleep
 - STOP: emergency stop on/off; active recording or playback is stopped first
-- REC: start or stop recording
-- PLAY: play the latest recording once
+- REC: start or stop recording (ignored during emergency stop)
+- PLAY: play the latest recording once (ignored during emergency stop)
+- During emergency stop, track color bricks are ignored as well
 - LIGHT: change train light color
 - SOUND: cycle sounds
 - WATER: trigger water action
