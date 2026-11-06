@@ -76,7 +76,8 @@ ONLY ON ESP32-S3 DEVKITC-1 WITH DUAL CORE
 
 #include <atomic>
 
-#define DELAY_TIME 100 // delay in ms
+// BLE name assigned to the connected train hub during initialization.
+#define HUB_NAME "DuploTrain_1"
 
 // Pin declaration
 // All buttons are wired through a resistor ladder to ADC pin 7 and decoded by voltage level.
@@ -298,25 +299,23 @@ void handleButtons(int btn_no, bool pressed)
     switch (btn_no)
     {
     case BUTTON_SOUND:
-        sound++;
-        if (sound == 2)
-            sound = 3; // skip WATER_REFILL sound
-        if (sound == 5)
-            sound = 0;
+        // Play the current entry first so the cycle starts with HORN, then advance.
         duploHub.playSound((DuploEnums::DuploSound)duploSounds[sound]);
         DEBUG_LOG("TrainController: Sound button pressed, playing sound %d", sound);
-        delay(DELAY_TIME);
+        sound++;
+        if (sound == 2)
+            sound = 3; // skip WATER_REFILL sound (has its own button)
+        if (sound == 5)
+            sound = 0;
         break;
     case BUTTON_LIGHT:
         color = (color + 1) % 11; // Cycle through DuploColor enum values
         duploHub.setLedColor((DuploEnums::DuploColor)color);
         DEBUG_LOG("TrainController: Light button pressed, color %d", color);
-        delay(DELAY_TIME);
         break;
     case BUTTON_WATER:
         duploHub.playSound((DuploEnums::DuploSound)duploSounds[2]); // Play WATER_REFILL sound
         DEBUG_LOG("TrainController: Water button pressed, playing WATER_REFILL");
-        delay(DELAY_TIME);
         break;
     case BUTTON_RECORD:
         DEBUG_LOG("TrainController: start or stop recording");
@@ -328,14 +327,12 @@ void handleButtons(int btn_no, bool pressed)
             statusLed.setColor(CRGB::Purple); // Blink purple when recording
             statusLed.setBlinking(true, 500, 1000);
             duploHub.recordCommands(true); // Start recording commands
-            delay(DELAY_TIME);             // Allow time for sound to play
         }
         else
         {
             DEBUG_LOG("TrainController: Recording stopped");
             duploHub.recordCommands(false); // Stop recording commands
             statusLed.setOff();             // LED off when recording stops
-            delay(DELAY_TIME);              // Allow time for sound to play
         }
         break;
     case BUTTON_PLAY:
@@ -356,7 +353,6 @@ void handleButtons(int btn_no, bool pressed)
         statusLed.setBlinking(true, 500, 1000);
         replay = true; // Set replay mode
         DEBUG_LOG("TrainController: Playback started");
-        delay(DELAY_TIME);
         break;
     case BUTTON_STOP:
         // If replay is active, stop replay and playback immediately
@@ -380,11 +376,8 @@ void handleButtons(int btn_no, bool pressed)
             statusLed.setColor(CRGB::Red); // Solid red when stop is active
             statusLed.setBlinking(false);
             duploHub.playSound((DuploEnums::DuploSound::BRAKE)); // Play brake sound
-            delay(DELAY_TIME);                                   // Allow time for sound to play
             duploHub.setLedColor(DuploEnums::DuploColor::RED);
-            delay(DELAY_TIME);
             duploHub.stopMotor();
-            delay(DELAY_TIME); // Stop the motor immediately
             lastSpeed = 0;
             rotaryEncoder.setEncoderValue(0);
             encoderValuePending.store(false); // Discard knob input that predates the stop
@@ -392,13 +385,10 @@ void handleButtons(int btn_no, bool pressed)
         else
         {
             duploHub.playSound((DuploEnums::DuploSound::STATION_DEPARTURE)); // Play departure sound
-            delay(DELAY_TIME);                                               // Allow time for sound to play
             duploHub.setLedColor(DuploEnums::DuploColor::GREEN);             // Set LED to green
             statusLed.setOff();                                              // LED off when stop is released
-            delay(DELAY_TIME);                                               // Allow time for sound to play
         }
         DEBUG_LOG("TrainController: Emergency stop %s", emergencyStop ? "activated" : "deactivated");
-        delay(DELAY_TIME);
         break;
     default:
         DEBUG_LOG("TrainController: Unknown button %d", btn_no);
@@ -503,7 +493,6 @@ static void detectedColorCb(DuploEnums::DuploColor color)
         DEBUG_LOG("TrainController:  Detected Color: %d", DuploEnums::DuploColor::BLACK);
         duploHub.setLedColor(DuploEnums::DuploColor::BLACK);
         statusLed.setColor(CRGB::Black);
-        delay(DELAY_TIME);
         break;
 
     case DuploEnums::DuploColor::RED:
@@ -511,11 +500,8 @@ static void detectedColorCb(DuploEnums::DuploColor color)
         statusLed.setColor(CRGB::Red); // Solid red when stop is active
         statusLed.setBlinking(false);
         duploHub.playSound((DuploEnums::DuploSound::BRAKE)); // Play brake sound
-        delay(DELAY_TIME);                                   // Allow time for sound to play
         duploHub.setLedColor(DuploEnums::DuploColor::RED);
-        delay(DELAY_TIME);
         duploHub.stopMotor();
-        delay(DELAY_TIME); // Stop the motor immediately
         lastSpeed = 0;     // a later BLUE tile must not restart the train
         rotaryEncoder.setEncoderValue(0);
         encoderValuePending.store(false);
@@ -528,14 +514,11 @@ static void detectedColorCb(DuploEnums::DuploColor color)
         duploHub.setLedColor(DuploEnums::DuploColor::GREEN);
         statusLed.setColor(CRGB::Green);
         statusLed.setBlinking(true, 250, 250, 3);
-        delay(DELAY_TIME);
         duploHub.stopMotor();
-        delay(DELAY_TIME);
         duploHub.setMotorSpeed(reverseSpeed);
         lastSpeed = reverseSpeed;
         rotaryEncoder.setEncoderValue(-reverseSpeed); // keep knob in sync (encoder = -speed)
         encoderValuePending.store(false);
-        delay(DELAY_TIME);
         break;
     }
 
@@ -544,9 +527,7 @@ static void detectedColorCb(DuploEnums::DuploColor color)
         duploHub.setLedColor(DuploEnums::DuploColor::YELLOW);
         statusLed.setColor(CRGB::Yellow);
         statusLed.setBlinking(true, 250, 250, 3);
-        delay(DELAY_TIME);
         duploHub.playSound((DuploEnums::DuploSound::HORN)); // Play horn sound
-        delay(DELAY_TIME);                                  // Allow time for sound to play
         break;
 
     case DuploEnums::DuploColor::BLUE:
@@ -554,13 +535,9 @@ static void detectedColorCb(DuploEnums::DuploColor color)
         duploHub.setLedColor(DuploEnums::DuploColor::BLUE);
         statusLed.setColor(CRGB::Blue);
         statusLed.setBlinking(true, 250, 250, 3);
-        delay(DELAY_TIME);
         duploHub.stopMotor();
-        delay(DELAY_TIME);                                          // Stop the motor
         duploHub.playSound((DuploEnums::DuploSound::WATER_REFILL)); // Play water refill sound
-        delay(DELAY_TIME);                                          // Allow time for sound to play
         duploHub.setMotorSpeed(lastSpeed);                          // Restore the last speed
-        delay(DELAY_TIME);
         break;
 
     case DuploEnums::DuploColor::WHITE:
@@ -569,7 +546,6 @@ static void detectedColorCb(DuploEnums::DuploColor color)
         duploHub.setLedColor(whiteLightEnabled ? DuploEnums::DuploColor::WHITE : DuploEnums::DuploColor::BLACK);
         statusLed.setColor(CRGB::White);
         statusLed.setBlinking(true, 250, 250, whiteLightEnabled ? 2 : 1);
-        delay(DELAY_TIME);
         break;
 
     default:
@@ -765,7 +741,7 @@ static void updateHubInitialization()
         break;
 
     case HubInitializationStep::SetHubName:
-        duploHub.setHubName("DuploTrain_1");
+        duploHub.setHubName(HUB_NAME);
         hubInitializationStep = HubInitializationStep::WaitForReady;
         break;
 
