@@ -1246,10 +1246,15 @@ DuploHub::AckExpectation DuploHub::executeCommand(const HubCommand &cmd)
         return {(int)DuploEnums::DuploTrainHubPort::SPEAKER, false};
 
     case CommandType::CMD_SET_HUB_NAME:
+    {
         // Hub property write: the hub sends no acknowledgement -> fixed pacing.
         DEBUG_LOG("BLE Task: Setting hub name to %s", cmd.data.hubName.name);
-        hub.setHubName(cmd.data.hubName.name);
+        char name[sizeof(cmd.data.hubName.name)];
+        memcpy(name, cmd.data.hubName.name, sizeof(name)); // Legoino takes a non-const char*
+        name[sizeof(name) - 1] = '\0';
+        hub.setHubName(name);
         return none;
+    }
 
     // Activations need the device to be announced by the hub first (see waitForHubDevice()).
     case CommandType::CMD_ACTIVATE_RGB_LIGHT:
