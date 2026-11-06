@@ -54,7 +54,15 @@ DuploHub *DuploHub::instance = nullptr;
 
 namespace
 {
-    constexpr uint64_t COLOR_SETTLE_DELAY_US = 250000; // 250 ms debounce window
+    // Color must stay unchanged this long before it is reported. Short enough that a tile is
+    // registered at full speed (was 250 ms: tiles were missed and reactions came too late);
+    // increase if reflective surfaces cause false tile detections.
+    constexpr uint64_t COLOR_SETTLE_DELAY_US = 80000; // 80 ms debounce window
+    // Pause after each BLE write. Lost writes are retried in Lpf2Hub::WriteValue(), so this only
+    // spaces commands roughly by one BLE connection event (was 20 ms motor / 200 ms others).
+    constexpr uint32_t COMMAND_PACING_MS = 20;
+    // Maximum time the BLE task waits for a new command before doing its housekeeping.
+    constexpr uint32_t COMMAND_WAIT_MS = 50;
     constexpr uint32_t BLE_TASK_WDT_TIMEOUT_S = 15;    // task watchdog timeout for the BLE task
     constexpr UBaseType_t COMMAND_QUEUE_LENGTH = 10;   // main loop -> BLE task
     constexpr UBaseType_t RESPONSE_QUEUE_LENGTH = 100; // BLE task -> main loop (sensor bursts)
@@ -983,11 +991,9 @@ void DuploHub::bleTaskFunction()
             lastConnectionCheck = currentTime;
         }
 
-        // Command handling runs more often than reconnect logic to keep UI latency low.
-        processCommandQueue();
-
-        // Small delay to prevent task from hogging CPU
-        vTaskDelay(pdMS_TO_TICKS(50)); // 50ms delay for good responsiveness
+        // Wait for commands (up to COMMAND_WAIT_MS) instead of polling: a queued command is sent
+        // immediately, and the task still yields the CPU and comes back for updateBLE().
+        processCommandQueue(pdMS_TO_TICKS(COMMAND_WAIT_MS));
     }
 }
 
@@ -1113,18 +1119,26 @@ void DuploHub::updateBLE()
 }
 
 /**
- * @brief Process all commands from the command queue (runs in BLE task).
+ * @brief Process commands from the command queue (runs in BLE task).
+ *
+ * Waits up to `firstWait` for the first command, then drains the queue. Every hub write is
+ * followed by the same short `COMMAND_PACING_MS` pause; failed writes are retried inside
+ * `Lpf2Hub::WriteValue()`.
+ *
+ * @param firstWait Maximum time to block for the first command.
  */
-void DuploHub::processCommandQueue()
+void DuploHub::processCommandQueue(TickType_t firstWait)
 {
     if (commandQueue == nullptr)
         return;
 
     HubCommand cmd;
+    TickType_t wait = firstWait;
 
-    // Process all available commands (non-blocking)
-    while (xQueueReceive(commandQueue, &cmd, 0) == pdTRUE)
+    while (xQueueReceive(commandQueue, &cmd, wait) == pdTRUE)
     {
+        wait = 0; // drain the rest without blocking
+
         // Sleep preparation must always be acknowledged, even if the hub is already gone.
         if (cmd.type == CommandType::CMD_STOP_AND_DISCONNECT)
         {
@@ -1152,76 +1166,59 @@ void DuploHub::processCommandQueue()
         case CommandType::CMD_MOTOR_SPEED:
             DEBUG_LOG("BLE Task: Setting motor speed to %d", cmd.data.motor.speed);
             hub.setBasicMotorSpeed((byte)DuploEnums::DuploTrainHubPort::MOTOR, cmd.data.motor.speed);
-            delay(20); // Short pacing delay so back-to-back protocol writes remain reliable.
-            DEBUG_LOG("DuploHub: setBasicMotorSpeed completed at: %lu", millis());
             break;
 
         case CommandType::CMD_STOP_MOTOR:
             DEBUG_LOG("BLE Task: Stopping motor");
             hub.stopBasicMotor((byte)DuploEnums::DuploTrainHubPort::MOTOR);
-            delay(20); // Short pacing delay so back-to-back protocol writes remain reliable.
-            DEBUG_LOG("DuploHub: stopBasicMotor completed at: %lu", millis());
             break;
 
         case CommandType::CMD_SET_LED_COLOR:
             DEBUG_LOG("BLE Task: Setting LED color to %d", cmd.data.led.color);
             hub.setLedColor((Color)cmd.data.led.color);
-            delay(200); // Property updates need a longer settle time than motor writes.
-            DEBUG_LOG("DuploHub: setLEDColor completed at: %lu", millis());
             break;
 
         case CommandType::CMD_SET_HUB_NAME:
             DEBUG_LOG("BLE Task: Setting hub name to %s", cmd.data.hubName.name);
             hub.setHubName(cmd.data.hubName.name);
-            delay(200); // Property updates need a longer settle time than motor writes.
-            DEBUG_LOG("DuploHub: setHubName completed at: %lu", millis());
             break;
 
         case CommandType::CMD_PLAY_SOUND:
             DEBUG_LOG("BLE Task: Playing sound with ID %d", cmd.data.sound.soundId);
             hub.playSound((byte)cmd.data.sound.soundId);
-            delay(200); // Property updates need a longer settle time than motor writes.
-            DEBUG_LOG("DuploHub: playSound completed at: %lu", millis());
             break;
 
         case CommandType::CMD_ACTIVATE_RGB_LIGHT:
             DEBUG_LOG("BLE Task: Activating RGB light");
             hub.activateRgbLight();
-            delay(200); // Activation commands are serialized to avoid missed port setup.
-            DEBUG_LOG("DuploHub: activateRgbLight completed");
             break;
 
         case CommandType::CMD_ACTIVATE_BASE_SPEAKER:
             DEBUG_LOG("BLE Task: Activating base speaker");
             hub.activateBaseSpeaker();
-            delay(200); // Activation commands are serialized to avoid missed port setup.
-            DEBUG_LOG("DuploHub: activateBaseSpeaker completed");
             break;
 
         case CommandType::CMD_ACTIVATE_COLOR_SENSOR:
             DEBUG_LOG("BLE Task: Activating color sensor");
             hub.activatePortDevice((byte)DuploEnums::DuploTrainHubPort::COLOR, staticColorSensorCallback);
-            delay(200);
-            DEBUG_LOG("DuploHub: setColorSensorCallback completed");
             break;
 
         case CommandType::CMD_ACTIVATE_SPEED_SENSOR:
             DEBUG_LOG("BLE Task: Activating speed sensor");
             hub.activatePortDevice((byte)DuploEnums::DuploTrainHubPort::SPEEDOMETER, staticSpeedSensorCallback);
-            delay(200);
-            DEBUG_LOG("DuploHub: setSpeedSensorCallback completed");
             break;
+
         case CommandType::CMD_ACTIVATE_VOLTAGE_SENSOR:
             DEBUG_LOG("BLE Task: Activating voltage sensor");
             hub.activatePortDevice((byte)DuploEnums::DuploTrainHubPort::VOLTAGE, staticVoltageSensorCallback);
-            delay(200);
-            DEBUG_LOG("DuploHub: setVoltageSensorCallback completed");
             break;
 
         default:
             DEBUG_LOG("BLE Task: Unknown command type");
             break;
         }
+
+        delay(COMMAND_PACING_MS);
     }
 }
 

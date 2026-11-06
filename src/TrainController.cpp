@@ -415,13 +415,11 @@ static int lastDriveDirection = 0;             ///< sign of the last non-zero ta
 /**
  * @brief Record a new non-zero target speed and what the speed sensor should report next.
  *
- * Call right before commanding a non-zero speed (dial, color bricks).
+ * Call right before commanding a non-zero speed (dial, GREEN tile, end of a water stop).
  *
  * @param newTarget Target speed being commanded (0 is ignored).
- * @param stopsFirst `true` if the command sequence stops the motor before driving on (BLUE/GREEN
- *        bricks), so a moving train passes through 0 even without a direction change.
  */
-static void noteTargetSpeed(int newTarget, bool stopsFirst = false)
+static void noteTargetSpeed(int newTarget)
 {
     if (newTarget == 0)
     {
@@ -433,7 +431,7 @@ static void noteTargetSpeed(int newTarget, bool stopsFirst = false)
     const bool reversing = (lastDriveDirection != 0 && newDirection != lastDriveDirection);
     lastDriveDirection = newDirection;
 
-    if (moving && (reversing || stopsFirst))
+    if (moving && reversing)
     {
         // The train will slow down through 0 before driving on: ignore that one 0 report.
         expectZeroReport = true;
@@ -447,6 +445,29 @@ static void noteTargetSpeed(int newTarget, bool stopsFirst = false)
         startPendingSinceMs = millis();
     }
     // Moving and continuing in the same direction: nothing special to expect.
+}
+
+// --- Color tile timing ----------------------------------------------------------------------
+// Pause on a BLUE tile (water refill) before the train continues at its previous speed.
+#define WATER_STOP_MS 2500
+// After reversing on a GREEN tile, further GREEN detections are ignored this long, so the
+// reversing train crossing the same tile again does not reverse once more.
+#define GREEN_COOLDOWN_MS 1000
+
+static bool waterStopActive = false;      ///< BLUE tile pause running
+static unsigned long waterStopUntilMs = 0; ///< end of the pause
+static int waterResumeSpeed = 0;           ///< speed to continue with after the pause
+
+/**
+ * @brief Cancel a running water stop (any user or tile action that sets a new speed wins).
+ */
+static void cancelWaterStop()
+{
+    if (waterStopActive)
+    {
+        waterStopActive = false;
+        DEBUG_LOG("TrainController: Water stop cancelled");
+    }
 }
 
 /**
@@ -527,6 +548,7 @@ static void processEncoder()
         return;
     }
 
+    cancelWaterStop(); // turning the dial during a water stop: the user's speed wins
     noteTargetSpeed(newSpeed);
     duploHub.setMotorSpeed(newSpeed);
     lastSpeed = newSpeed;
@@ -569,10 +591,11 @@ static void detectedColorCb(DuploEnums::DuploColor color)
 
     case DuploEnums::DuploColor::RED:
         DEBUG_LOG("TrainController:  Detected Color: %d", DuploEnums::DuploColor::RED);
+        cancelWaterStop();
+        duploHub.stopMotor(); // motor first, then sound and LED
         // Event burst like the other tiles.
         statusLed.setColor(CRGB::Red);
         statusLed.setBlinking(true, 250, 250, 3);
-        duploHub.stopMotor();                                // Stop first, then sound and LED
         duploHub.playSound((DuploEnums::DuploSound::BRAKE)); // Play brake sound
         duploHub.setLedColor(DuploEnums::DuploColor::RED);
         lastSpeed = 0; // a later BLUE tile must not restart the train
@@ -582,17 +605,26 @@ static void detectedColorCb(DuploEnums::DuploColor color)
 
     case DuploEnums::DuploColor::GREEN:
     {
+        static unsigned long lastGreenMs = 0;
+        const unsigned long now = millis();
         DEBUG_LOG("TrainController:  Detected Color: %d", DuploEnums::DuploColor::GREEN);
+        if (lastGreenMs != 0 && now - lastGreenMs < GREEN_COOLDOWN_MS)
+        {
+            DEBUG_LOG("TrainController: GREEN ignored (cool-down after reversing)");
+            break;
+        }
+        lastGreenMs = now;
+        cancelWaterStop();
+
         const int reverseSpeed = (lastSpeed == 0) ? -40 : -lastSpeed;
-        duploHub.setLedColor(DuploEnums::DuploColor::GREEN);
-        statusLed.setColor(CRGB::Green);
-        statusLed.setBlinking(true, 250, 250, 3);
-        noteTargetSpeed(reverseSpeed, true); // stop + reverse passes through 0
-        duploHub.stopMotor();
-        duploHub.setMotorSpeed(reverseSpeed);
+        noteTargetSpeed(reverseSpeed);        // reversing while moving passes through 0
+        duploHub.setMotorSpeed(reverseSpeed); // motor first: reverse directly, no separate stop
         lastSpeed = reverseSpeed;
         rotaryEncoder.setEncoderValue(-reverseSpeed); // keep knob in sync (encoder = -speed)
         encoderValuePending.store(false);
+        statusLed.setColor(CRGB::Green);
+        statusLed.setBlinking(true, 250, 250, 3);
+        duploHub.setLedColor(DuploEnums::DuploColor::GREEN);
         break;
     }
 
@@ -606,13 +638,20 @@ static void detectedColorCb(DuploEnums::DuploColor color)
 
     case DuploEnums::DuploColor::BLUE:
         DEBUG_LOG("TrainController:  Detected Color: %d", DuploEnums::DuploColor::BLUE);
-        duploHub.setLedColor(DuploEnums::DuploColor::BLUE);
+        if (lastSpeed != 0 && !waterStopActive)
+        {
+            // Water stop: stop now, continue at the same speed after WATER_STOP_MS (updateWaterStop()).
+            // The target is 0 during the pause, so the stop is not treated as "stopped by itself".
+            duploHub.stopMotor(); // motor first
+            waterResumeSpeed = lastSpeed;
+            lastSpeed = 0;
+            waterStopActive = true;
+            waterStopUntilMs = millis() + WATER_STOP_MS;
+        }
+        duploHub.playSound((DuploEnums::DuploSound::WATER_REFILL));
         statusLed.setColor(CRGB::Blue);
         statusLed.setBlinking(true, 250, 250, 3);
-        noteTargetSpeed(lastSpeed, true); // stop, water, continue: may pass through 0
-        duploHub.stopMotor();
-        duploHub.playSound((DuploEnums::DuploSound::WATER_REFILL)); // Play water refill sound
-        duploHub.setMotorSpeed(lastSpeed);                          // Restore the last speed
+        duploHub.setLedColor(DuploEnums::DuploColor::BLUE);
         break;
 
     case DuploEnums::DuploColor::WHITE:
@@ -701,6 +740,32 @@ static void detectedSpeedCb(int speed)
  * `START_TIMEOUT_MS` (only once the speed sensor has proven to work), and forgets an expected
  * pass-through-0 report that never arrived.
  */
+static void updateWaterStop()
+{
+    if (!waterStopActive)
+    {
+        return;
+    }
+    if (!hubReady || replay)
+    {
+        waterStopActive = false;
+        return;
+    }
+    if ((long)(millis() - waterStopUntilMs) < 0)
+    {
+        return;
+    }
+
+    // Pause over: continue at the speed the train had before the BLUE tile.
+    waterStopActive = false;
+    DEBUG_LOG("TrainController: Water stop over - continue at %d", waterResumeSpeed);
+    noteTargetSpeed(waterResumeSpeed); // from standstill: movement must be reported
+    duploHub.setMotorSpeed(waterResumeSpeed);
+    lastSpeed = waterResumeSpeed;
+    rotaryEncoder.setEncoderValue(-waterResumeSpeed);
+    encoderValuePending.store(false);
+}
+
 static void checkTrainStalled()
 {
     if (!hubReady || replay || lastSpeed == 0)
@@ -774,6 +839,7 @@ static void onHubDisconnected()
     readyHeartbeatActive = false;
     detectedVoltage = 0.0f; // no valid reading until the next connection reports one
     detectedSpeed = 0;      // train is assumed standing until the sensor reports movement
+    cancelWaterStop();
     // Replay only advances while connected; end it so it cannot keep the controller awake.
     if (replay)
     {
@@ -1392,6 +1458,7 @@ void esp_goto_sleep()
         duploHub.recordCommands(false);
         recording = false;
     }
+    cancelWaterStop();
     const bool linkShutDown = duploHub.shutdownLinkForSleep(1500);
     DEBUG_LOG("TrainController: Motor stop + disconnect before sleep %s", linkShutDown ? "confirmed" : "timed out");
     lastSpeed = 0;
@@ -1440,6 +1507,7 @@ static void normalStop()
     {
         return;
     }
+    cancelWaterStop(); // STOP during a water stop: do not continue afterwards
     if (replay)
     {
         duploHub.stopReplay();
@@ -1578,6 +1646,8 @@ void loop()
     processEncoderButton();
 
     checkTrainStalled();
+
+    updateWaterStop();
 
     updateHubInitialization();
 

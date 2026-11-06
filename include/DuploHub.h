@@ -173,8 +173,9 @@ private:
 
     /**
      * @brief Pull commands from the queue and forward them to the hub.
+     * @param firstWait Maximum time to block waiting for the first command.
      */
-    void processCommandQueue();
+    void processCommandQueue(TickType_t firstWait);
 
     /**
      * @brief Flush pending commands and responses.

@@ -27,7 +27,7 @@ The implementation emphasizes low perceived latency:
 
 ### Queue model
 
-- `commandQueue` (10 entries): main loop to BLE task
+- `commandQueue` (10 entries): main loop to BLE task; the BLE task waits on it (no polling), so a command goes out immediately; every hub write is followed by a 20 ms pause, and a write the BLE stack rejects (no free buffer) is retried in `Lpf2Hub::WriteValue()` instead of being lost
 - `responseQueue` (100 entries): BLE task to main loop (sensor events)
 
 ### Shared synchronization
@@ -126,10 +126,10 @@ Buttons and dial are ignored until the hub is connected and ready. During replay
 The color sensor is noisy on reflective surfaces. To reduce false triggers:
 
 - raw color changes are collected in BLE context
-- a one-shot ESP timer waits for 250 ms stability
+- a one-shot ESP timer waits for 80 ms stability (short enough to register a tile at full speed)
 - only stable transitions are pushed into `responseQueue`
 
-Color bricks (ignored during record and replay): RED stops, GREEN stops and reverses (from standstill starts at 40), BLUE stops for the water sound and continues, YELLOW horn, WHITE toggles the train light.
+Color bricks are handled entirely by the controller (the hub does nothing on its own while connected; ignored during record and replay). The motor command is always sent first, sound and LED after it. RED stops; GREEN reverses directly (from standstill starts at 40), further GREEN detections are ignored for 1 s so the reversing train does not reverse again on the same tile; BLUE stops for 2.5 s with the water sound and then continues at the previous speed (dial or STOP during the pause win); YELLOW horn; WHITE toggles the train light.
 
 ### Speed sensor
 
@@ -141,7 +141,7 @@ Color bricks (ignored during record and replay): RED stops, GREEN stops and reve
 The DUPLO hub cuts the motor by itself when the train is blocked, lifted or pressed down. The controller keeps its target speed and knob in sync:
 
 - a speed report of 0 while a target speed is set resets target and knob to 0 immediately (stop sent)
-- when the controller's own command passes through 0 (direction change while moving, GREEN/BLUE bricks), one 0 report is expected and ignored (expires after 1.5 s)
+- when the controller's own command passes through 0 (direction change while moving, GREEN brick), one 0 report is expected and ignored (expires after 1.5 s); during a BLUE water stop the target is 0, so the stop is not treated as "stopped by itself"
 - a train that never starts sends no report: a drive command from standstill must produce a movement report within 1 s, once the sensor has reported at least once
 - not applied during replay
 

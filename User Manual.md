@@ -59,7 +59,7 @@ Short blink bursts are events; after a burst the LED returns to the current mode
 - Red: stop train
 - Green: stop and switch direction
 - White: train light on or off
-- Blue: water action and then continue at last speed
+- Blue: stop for about 2.5 seconds for water, then continue at the previous speed
 
 ## 7. Typical Issues
 

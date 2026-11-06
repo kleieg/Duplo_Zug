@@ -119,11 +119,26 @@ public:
  * @param [in] command byte array which contains the ble command
  * @param [in] size length of the command byte array
  */
-void Lpf2Hub::WriteValue(byte command[], int size)
+bool Lpf2Hub::WriteValue(byte command[], int size)
 {
     byte commandWithCommonHeader[size + 2] = {(byte)(size + 2), 0x00};
     memcpy(commandWithCommonHeader + 2, command, size);
-    _pRemoteCharacteristic->writeValue(commandWithCommonHeader, sizeof(commandWithCommonHeader), false);
+
+    // Project-local change (DUPLO controller): a write without response fails when the BLE stack
+    // has no free buffers (commands sent faster than connection events). The original code ignored
+    // that and the command was silently lost; retry briefly instead of relying on fixed delays.
+    constexpr int WRITE_ATTEMPTS = 5;
+    constexpr int WRITE_RETRY_DELAY_MS = 10;
+    for (int attempt = 0; attempt < WRITE_ATTEMPTS; attempt++)
+    {
+        if (_pRemoteCharacteristic->writeValue(commandWithCommonHeader, sizeof(commandWithCommonHeader), false))
+        {
+            return true;
+        }
+        delay(WRITE_RETRY_DELAY_MS);
+    }
+    log_e("BLE write failed after %d attempts (command 0x%02x)", WRITE_ATTEMPTS, size > 0 ? command[0] : 0);
+    return false;
 }
 
 /**

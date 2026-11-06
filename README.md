@@ -109,7 +109,7 @@ The following color bricks of the DUPLO Train are also recognized (ignored durin
 | Yellow | horn | 3x yellow |
 | Red | stop train | 3x red |
 | Green | stop and switch driving direction (from standstill: start at 40) | 3x green |
-| Blue | water action, then continue at previous speed | 3x blue |
+| Blue | stops about 2.5 s with the water sound, then continues at the previous speed | 3x blue |
 | White | toggle light | 2x white (light on) / 1x white (light off) |
 | Black | train light off | - |
 | Other colors | train light takes that color | - |
