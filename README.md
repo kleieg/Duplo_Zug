@@ -73,13 +73,15 @@ Implemented features (high level):
 The controller LED indicates the current state as follows:
 
 - Yellow blinking: controller is booting
-- Blue blinking: BLE link is up, hub initialization still running
+- Short blue flash every ~1.5 s: no train connected, searching
+- Fast blue blinking: BLE link is up, hub initialization still running
 - Green blinking: hub is operational and commands can be executed
 - Green occasional short pulses: operational and idle
 - Violet blinking: recording active
 - Yellow blinking: replay active
-- Red short blink sequence: train low-voltage warning
-- White blinking: hub disconnected
+- 5x fast red: train low-voltage warning (every 30 s)
+- 3x red: train stopped at a red track brick
+- 3x white: connection to the train lost (then back to the searching flash)
 - 5x green: wake from sleep confirmed
 - 2x red: sleep entry indication
 
