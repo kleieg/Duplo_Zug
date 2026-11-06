@@ -572,59 +572,68 @@ static void detectedVoltageCb(float voltage)
     detectedVoltage = voltage;
 }
 
-// Minimum time after a target speed change before a reported speed of 0 counts as a hub
-// auto-stop (covers start-up and passing through 0 when the direction changes).
-#define AUTO_STOP_GRACE_MS 1000
+// A target speed != 0 while the train stands still for this long resets the target to 0
+// (train blocked, lifted, pressed down, or never got going). Covers start-up and passing
+// through 0 when the direction changes.
+#define STALL_RESET_MS 1000
+
+// `true` once the speed sensor has reported at least once (proves it works on this train).
+static bool speedSensorSeen = false;
 
 /**
  * @brief Callback for detected speed events from the speed sensor.
  *
- * Also keeps the controller in sync with the hub's built-in safety stop: the DUPLO hub cuts the
- * motor by itself when the train is blocked, lifted or pressed down. If the train was seen moving
- * at the current target speed and then reports 0, the target is reset to 0 (stop sent, knob to 0),
- * so the next dial click starts from standstill instead of the old speed.
- *
- * The sensor only reports changes, so "seen moving" is any non-zero report after the target last
- * changed. Not applied during replay.
+ * The sensor only reports changes, so `detectedSpeed` holds the last reported value
+ * (non-zero while driving at constant speed, 0 after the train stopped).
  *
  * @param speed The detected speed value (normalized, 0 = stopped).
  */
 static void detectedSpeedCb(int speed)
 {
-    static int observedTarget = 0;
-    static unsigned long targetChangedMs = 0;
-    static bool seenMoving = false;
-
     DEBUG_LOG("TrainController:  Detected Speed: %d", speed);
     detectedSpeed = speed;
+    speedSensorSeen = true;
+}
+
+/**
+ * @brief Keep the target speed in sync with a train that stands still (main loop).
+ *
+ * The DUPLO hub cuts the motor by itself when the train is blocked, lifted or pressed down, and a
+ * blocked train may never get going. If the target is not 0 but the train has been standing for
+ * `STALL_RESET_MS` since the target was last changed, a stop is sent and target and knob are reset
+ * to 0, so the next dial click starts from standstill. Only active once the speed sensor has
+ * reported at least once (otherwise every drive command would be cut off), and not during replay.
+ */
+static void checkTrainStalled()
+{
+    static int observedTarget = 0;
+    static unsigned long standingSinceMs = 0;
 
     const unsigned long now = millis();
-    if (lastSpeed != observedTarget)
+    const bool standingWithTarget = hubReady && speedSensorSeen && !replay && lastSpeed != 0 && detectedSpeed == 0;
+
+    if (!standingWithTarget)
     {
-        // Target changed since the last report: start over (first report after the change).
+        standingSinceMs = 0;
         observedTarget = lastSpeed;
-        targetChangedMs = now;
-        seenMoving = false;
-    }
-
-    if (lastSpeed == 0 || replay)
-    {
         return;
     }
 
-    if (speed != 0)
+    // Start (or restart after a new target) the stall timer.
+    if (standingSinceMs == 0 || lastSpeed != observedTarget)
     {
-        seenMoving = true;
+        standingSinceMs = now;
+        observedTarget = lastSpeed;
         return;
     }
 
-    if (seenMoving && now - targetChangedMs >= AUTO_STOP_GRACE_MS)
+    if (now - standingSinceMs >= STALL_RESET_MS)
     {
-        DEBUG_LOG("TrainController: Train stopped by itself (blocked/lifted) - target %d reset to 0", lastSpeed);
+        DEBUG_LOG("TrainController: Train stands still (blocked/lifted/not starting) - target %d reset to 0", lastSpeed);
         duploHub.stopMotor();
         lastSpeed = 0;
         observedTarget = 0;
-        seenMoving = false;
+        standingSinceMs = 0;
         rotaryEncoder.setEncoderValue(0);
         encoderValuePending.store(false);
     }
@@ -680,6 +689,7 @@ static void onHubDisconnected()
     hubInitializationStepStartedMs = 0;
     readyHeartbeatActive = false;
     detectedVoltage = 0.0f; // no valid reading until the next connection reports one
+    detectedSpeed = 0;      // train is assumed standing until the sensor reports movement
     // Replay only advances while connected; end it so it cannot keep the controller awake.
     if (replay)
     {
@@ -1471,6 +1481,8 @@ void loop()
     processEncoder();
 
     processEncoderButton();
+
+    checkTrainStalled();
 
     updateHubInitialization();
 
