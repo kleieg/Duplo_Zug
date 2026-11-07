@@ -105,7 +105,7 @@ Steps:
 
 ### Push to start
 
-If the train has been standing without a target speed for at least 1 s and the speed sensor then reports any movement (pushed by hand), the controller starts it at +/-`MIN_SPEED` in the push direction (sensor sign = motor sign). The 1 s arming time keeps a train that is still rolling out after a stop from restarting itself. Not during replay; a running water stop is cancelled.
+If the train has come to a standstill without a target speed (the speed sensor reported 0) and the sensor then reports any movement (pushed by hand), the controller starts it at +/-`MIN_SPEED` in the push direction (sensor sign = motor sign). Requiring the standstill first keeps a train that is still rolling out after a stop from restarting itself; `PUSH_START_ARM_MS` can add a wait after the standstill (0 = none). Not during replay; a running water stop is cancelled.
 
 ### Dial button (GPIO 11)
 

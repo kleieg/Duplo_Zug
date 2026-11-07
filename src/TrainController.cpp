@@ -789,9 +789,10 @@ static void updateWaterStop()
 }
 
 // Push to start: a standing train that is pushed by hand starts driving in the push direction.
-// The train must have been standing (speed sensor reported 0, no target) for this long, so a
-// train still rolling out after a stop does not restart itself.
-#define PUSH_START_ARM_MS 1000
+// The train must first have come to a standstill (speed sensor reported 0, no target), so a
+// train still rolling out after a stop does not restart itself. Additional wait after the
+// standstill before a push counts: 0 = none (pushing right after a stop works immediately).
+#define PUSH_START_ARM_MS 0
 // Minimum reported speed (normalized) that counts as a push. 1 = any measured movement (the
 // sensor only reports changes > 5 raw anyway); a higher value made pushing too stiff.
 #define PUSH_START_MIN_SPEED 1
