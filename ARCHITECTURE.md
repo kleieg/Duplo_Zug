@@ -92,7 +92,7 @@ Steps:
 
 - six buttons on one ADC pin (GPIO 7), decoded by voltage range
 - a press is reported after 3 settling samples plus 3 averaged samples, one sample per loop pass: about 120 to 150 ms hold time (`ADC_BUTTON_SAMPLES`)
-- STOP: plain stop (see below); REC/PLAY: record and replay; LIGHT, SOUND, WATER: train light and sounds
+- STOP: plain stop (see below); REC/PLAY: record and replay; LIGHT, SOUND: train light and sounds; WATER: water stop, identical to the BLUE brick (`startWaterStop()`)
 
 ### Dial (rotary encoder)
 

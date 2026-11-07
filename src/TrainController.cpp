@@ -138,6 +138,11 @@ static int detectedColor = 0;
  */
 static void normalStop();
 
+/**
+ * @brief Water stop (BLUE tile and WATER button): stop, water sound, continue after a pause.
+ */
+static void startWaterStop();
+
 // High-level operating modes used by the main loop and status LED logic.
 static bool recording = false;
 static bool replay = false; // true when a sequence is being replayed
@@ -340,8 +345,8 @@ void handleButtons(int btn_no, bool pressed)
         DEBUG_LOG("TrainController: Light button pressed, color %d", color);
         break;
     case BUTTON_WATER:
-        duploHub.playSound((DuploEnums::DuploSound)duploSounds[2]); // Play WATER_REFILL sound
-        DEBUG_LOG("TrainController: Water button pressed, playing WATER_REFILL");
+        DEBUG_LOG("TrainController: Water button pressed - water stop");
+        startWaterStop(); // same as the BLUE tile
         break;
     case BUTTON_RECORD:
         DEBUG_LOG("TrainController: start or stop recording");
@@ -468,6 +473,30 @@ static void cancelWaterStop()
         waterStopActive = false;
         DEBUG_LOG("TrainController: Water stop cancelled");
     }
+}
+
+/**
+ * @brief Water stop, shared by the BLUE tile and the WATER button.
+ *
+ * While driving: stop now, play the water sound and continue at the same speed after
+ * WATER_STOP_MS (see updateWaterStop()). The target is 0 during the pause, so the stop is not
+ * treated as "stopped by itself"; dial, STOP, a push or another tile cancel the continue.
+ * While standing (or during a running water stop): only sound and LED feedback.
+ */
+static void startWaterStop()
+{
+    if (lastSpeed != 0 && !waterStopActive)
+    {
+        duploHub.stopMotor(); // motor first
+        waterResumeSpeed = lastSpeed;
+        lastSpeed = 0;
+        waterStopActive = true;
+        waterStopUntilMs = millis() + WATER_STOP_MS;
+    }
+    duploHub.playSound((DuploEnums::DuploSound::WATER_REFILL));
+    statusLed.setColor(CRGB::Blue);
+    statusLed.setBlinking(true, 250, 250, 3);
+    duploHub.setLedColor(DuploEnums::DuploColor::BLUE);
 }
 
 /**
@@ -643,20 +672,7 @@ static void detectedColorCb(DuploEnums::DuploColor color)
 
     case DuploEnums::DuploColor::BLUE:
         DEBUG_LOG("TrainController:  Detected Color: %d", DuploEnums::DuploColor::BLUE);
-        if (lastSpeed != 0 && !waterStopActive)
-        {
-            // Water stop: stop now, continue at the same speed after WATER_STOP_MS (updateWaterStop()).
-            // The target is 0 during the pause, so the stop is not treated as "stopped by itself".
-            duploHub.stopMotor(); // motor first
-            waterResumeSpeed = lastSpeed;
-            lastSpeed = 0;
-            waterStopActive = true;
-            waterStopUntilMs = millis() + WATER_STOP_MS;
-        }
-        duploHub.playSound((DuploEnums::DuploSound::WATER_REFILL));
-        statusLed.setColor(CRGB::Blue);
-        statusLed.setBlinking(true, 250, 250, 3);
-        duploHub.setLedColor(DuploEnums::DuploColor::BLUE);
+        startWaterStop();
         break;
 
     case DuploEnums::DuploColor::WHITE:

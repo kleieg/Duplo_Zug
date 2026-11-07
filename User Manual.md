@@ -37,7 +37,7 @@ Short blink bursts are events; after a burst the LED returns to the current mode
 - PLAY: play the latest recording once
 - LIGHT: change train light color
 - SOUND: cycle sounds
-- WATER: trigger water action
+- WATER: water stop like the blue brick (while driving: stop, water sound, continue after about 2.5 s; standing: only the sound)
 
 ## 4. Sleep And Wake
 

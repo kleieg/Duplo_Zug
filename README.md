@@ -99,7 +99,7 @@ Short bursts are events; afterwards the LED returns to the current state.
 - STOP: stop the train (same as encoder press), also ends a replay
 - LIGHT: cycle train light colors
 - SOUND: cycle sounds
-- WATER: trigger water action
+- WATER: water stop like the blue brick (while driving: stop, water sound, continue after about 2.5 s; standing: only the sound)
 
 ## Color Bricks
 
