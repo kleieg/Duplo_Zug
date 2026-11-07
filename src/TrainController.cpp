@@ -796,20 +796,23 @@ static void updatePushStart()
         return;
     }
 
-    if (detectedSpeed == 0)
+    if (abs(detectedSpeed) < PUSH_START_MIN_SPEED)
     {
+        // Standing, or only just starting to roll (the first reports of a gentle push are small):
+        // keep/arm the timer. Small values must not disarm, otherwise a push that starts gently
+        // never triggers.
         if (standingSinceMs == 0)
         {
-            standingSinceMs = now; // standing without target: arm after PUSH_START_ARM_MS
+            standingSinceMs = now; // arm after PUSH_START_ARM_MS
         }
         return;
     }
 
-    // Moving without target: a push if the train had been standing long enough, otherwise it is
-    // still rolling out after a stop.
+    // Clearly moving without target: a push if the train had been standing long enough,
+    // otherwise it is still rolling out after a stop.
     const bool armed = (standingSinceMs != 0 && now - standingSinceMs >= PUSH_START_ARM_MS);
     standingSinceMs = 0;
-    if (!armed || abs(detectedSpeed) < PUSH_START_MIN_SPEED)
+    if (!armed)
     {
         return;
     }
