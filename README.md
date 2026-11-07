@@ -92,6 +92,7 @@ Short bursts are events; afterwards the LED returns to the current state.
 
 - Rotate encoder: set speed reverse, stop, forward
 - Press encoder: normal stop; in sleep: wake
+- Push the standing train by hand: it starts at minimum speed in the push direction
 - Hold encoder 2 s, release: sleep now
 - REC: start/stop recording
 - PLAY: play the latest recording once

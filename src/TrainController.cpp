@@ -772,6 +772,60 @@ static void updateWaterStop()
     encoderValuePending.store(false);
 }
 
+// Push to start: a standing train that is pushed by hand starts driving in the push direction.
+// The train must have been standing (speed sensor reported 0, no target) for this long, so a
+// train still rolling out after a stop does not restart itself.
+#define PUSH_START_ARM_MS 1000
+// Minimum reported speed (normalized) that counts as a push.
+#define PUSH_START_MIN_SPEED 10
+
+/**
+ * @brief Push to start (main loop): start at +/-MIN_SPEED when a standing train is pushed.
+ *
+ * The speed sensor's sign matches the motor command, so the push direction becomes the driving
+ * direction. Not during replay; a running water stop is cancelled (the push wins).
+ */
+static void updatePushStart()
+{
+    static unsigned long standingSinceMs = 0; // 0 = not (yet) standing without target
+
+    const unsigned long now = millis();
+    if (!hubReady || replay || lastSpeed != 0)
+    {
+        standingSinceMs = 0;
+        return;
+    }
+
+    if (detectedSpeed == 0)
+    {
+        if (standingSinceMs == 0)
+        {
+            standingSinceMs = now; // standing without target: arm after PUSH_START_ARM_MS
+        }
+        return;
+    }
+
+    // Moving without target: a push if the train had been standing long enough, otherwise it is
+    // still rolling out after a stop.
+    const bool armed = (standingSinceMs != 0 && now - standingSinceMs >= PUSH_START_ARM_MS);
+    standingSinceMs = 0;
+    if (!armed || abs(detectedSpeed) < PUSH_START_MIN_SPEED)
+    {
+        return;
+    }
+
+    const int target = (detectedSpeed > 0) ? MIN_SPEED : -MIN_SPEED;
+    DEBUG_LOG("TrainController: Train pushed (speed %d) - start at %d", detectedSpeed, target);
+    cancelWaterStop();
+    lastDriveDirection = (target > 0) ? 1 : -1; // pushed direction: no pass through 0 to expect
+    noteTargetSpeed(target);
+    duploHub.setMotorSpeed(target);
+    lastSpeed = target;
+    rotaryEncoder.setEncoderValue(-target); // encoder value = -speed
+    encoderValuePending.store(false);
+    lastUserActionTime = now;
+}
+
 static void checkTrainStalled()
 {
     if (!hubReady || replay || lastSpeed == 0)
@@ -1654,6 +1708,8 @@ void loop()
     checkTrainStalled();
 
     updateWaterStop();
+
+    updatePushStart();
 
     updateHubInitialization();
 

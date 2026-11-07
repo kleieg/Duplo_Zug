@@ -30,6 +30,7 @@ Short blink bursts are events; after a burst the LED returns to the current mode
 
 - Rotate encoder: set reverse or forward speed (first click from standstill starts at the minimum speed)
 - Press encoder: stop the train (normal stop, nothing locked; also ends a playback). In sleep: wake the controller
+- Push the standing train by hand: it starts driving slowly in that direction
 - Hold encoder 2 s: LED blinks red fast, release to put the controller to sleep right away
 - STOP: stop the train (same as pressing the encoder; nothing is locked, also ends a playback)
 - REC: start or stop recording
