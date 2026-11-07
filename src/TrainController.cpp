@@ -776,8 +776,9 @@ static void updateWaterStop()
 // The train must have been standing (speed sensor reported 0, no target) for this long, so a
 // train still rolling out after a stop does not restart itself.
 #define PUSH_START_ARM_MS 1000
-// Minimum reported speed (normalized) that counts as a push.
-#define PUSH_START_MIN_SPEED 10
+// Minimum reported speed (normalized) that counts as a push. 1 = any measured movement (the
+// sensor only reports changes > 5 raw anyway); a higher value made pushing too stiff.
+#define PUSH_START_MIN_SPEED 1
 
 /**
  * @brief Push to start (main loop): start at +/-MIN_SPEED when a standing train is pushed.
