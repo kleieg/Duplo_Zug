@@ -17,6 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- Push to start: a train that has been standing for at least 1 s without target speed starts at +/-`MIN_SPEED` in the push direction when it is pushed by hand (speed sensor reports >= 10). Not during replay; cancels a running water stop.
 - Dial (encoder) button while awake: press = normal stop (immediate, nothing locked, also ends a replay; STOP stays the latching emergency stop), hold 2 s = fast red blinking, sleep on release. The press that wakes the controller is ignored until released.
 - Encoder button pin is now a plain digital input at runtime; the RTC wake configuration is applied only right before sleeping.
 
