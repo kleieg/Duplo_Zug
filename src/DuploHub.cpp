@@ -58,6 +58,10 @@ namespace
     // registered at full speed (was 250 ms: tiles were missed and reactions came too late);
     // increase if reflective surfaces cause false tile detections.
     constexpr uint64_t COLOR_SETTLE_DELAY_US = 80000; // 80 ms debounce window
+    // Color sensor input mode: 0 = COLOR (classifies any surface into a color index, also carpet,
+    // floor, nothing), 1 = C TAG ("color tag", presumably the hub's own action tile detection).
+    // TEST: C TAG is being evaluated against false detections; set to 0 for the previous behavior.
+    constexpr uint8_t COLOR_SENSOR_MODE = 1;
     // The DUPLO hub silently drops a command that arrives while it is still processing the
     // previous one (seen on hardware with 20 ms spacing: random loss of stop/sound/LED commands
     // and sensor activations). Normally the BLE task waits for the hub's acknowledgement
@@ -1285,6 +1289,17 @@ DuploHub::AckExpectation DuploHub::executeCommand(const HubCommand &cmd)
         if (!waitForHubDevice((byte)DuploEnums::DuploTrainHubPort::COLOR, "color sensor"))
             return none;
         hub.activatePortDevice((byte)DuploEnums::DuploTrainHubPort::COLOR, staticColorSensorCallback);
+        if (COLOR_SENSOR_MODE != 0)
+        {
+            // Legoino activates mode 0 (COLOR); after the hub confirmed it, switch to the configured
+            // mode. The callback stays registered for the port.
+            uint8_t status = 0;
+            if (!waitForAck((byte)DuploEnums::DuploTrainHubPort::COLOR, true, status))
+            {
+                log_e("Hub did not confirm color sensor setup within %u ms", (unsigned)ACK_TIMEOUT_MS);
+            }
+            hub.setColorSensorMode(COLOR_SENSOR_MODE);
+        }
         return {(int)DuploEnums::DuploTrainHubPort::COLOR, true};
 
     case CommandType::CMD_ACTIVATE_SPEED_SENSOR:

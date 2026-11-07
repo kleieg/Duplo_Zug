@@ -129,7 +129,7 @@ The color sensor is noisy on reflective surfaces. To reduce false triggers:
 - a one-shot ESP timer waits for 80 ms stability (short enough to register a tile at full speed)
 - only stable transitions are pushed into `responseQueue`
 
-Color bricks are handled entirely by the controller (the hub does nothing on its own while connected; ignored during record and replay). The motor command is always sent first, sound and LED after it. Only the five action colors react; black (track gaps) and other colors are ignored. RED stops; GREEN reverses directly (from standstill starts at 40), further GREEN detections are ignored for 1 s so the reversing train does not reverse again on the same tile; BLUE stops for 2.5 s with the water sound and then continues at the previous speed (dial or STOP during the pause win); YELLOW horn; WHITE toggles the train light.
+Color bricks are handled entirely by the controller (the hub does nothing on its own while connected; ignored during record and replay). The motor command is always sent first, sound and LED after it. Tiles only count while the train is driving (target speed set and the speed sensor reports movement), so standing, lifted or pushed trains do not react to carpet or floor. Only the five action colors react; black (track gaps) and other colors are ignored. The color sensor runs in mode 1 "C TAG" (color tag, under evaluation; `COLOR_SENSOR_MODE` in `DuploHub.cpp`, 0 = plain COLOR). RED stops; GREEN reverses directly, further GREEN detections are ignored for 1 s so the reversing train does not reverse again on the same tile; BLUE stops for 2.5 s with the water sound and then continues at the previous speed (dial or STOP during the pause win); YELLOW horn; WHITE toggles the train light.
 
 ### Speed sensor
 

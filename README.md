@@ -102,13 +102,13 @@ Short bursts are events; afterwards the LED returns to the current state.
 
 ## Color Bricks
 
-The following color bricks of the DUPLO Train are also recognized (ignored during recording and replay). The controller LED confirms each one with a short burst in the brick's color:
+The following color bricks of the DUPLO Train are also recognized while the train is driving (ignored when standing, lifted, during recording and replay). The controller LED confirms each one with a short burst in the brick's color:
 
 | Brick | Train | Controller LED |
 |---|---|---|
 | Yellow | horn | 3x yellow |
 | Red | stop train | 3x red |
-| Green | stop and switch driving direction (from standstill: start at 40) | 3x green |
+| Green | switch driving direction | 3x green |
 | Blue | stops about 2.5 s with the water sound, then continues at the previous speed | 3x blue |
 | White | toggle light | 2x white (light on) / 1x white (light off) |
 | Black, other colors | no reaction (gaps and edges of the track also read as black) | - |

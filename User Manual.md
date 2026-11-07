@@ -55,6 +55,8 @@ Short blink bursts are events; after a burst the LED returns to the current mode
 
 ## 6. Track Color Bricks
 
+Bricks only work while the train is driving; a standing or lifted train ignores colors.
+
 - Yellow: horn
 - Red: stop train
 - Green: stop and switch direction

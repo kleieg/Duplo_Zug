@@ -119,6 +119,15 @@ public:
     void setSpeakerSoundMode();
 
     /**
+     * @brief Switch the (already activated) color sensor to another input mode, updates enabled.
+     * @param mode 0 = COLOR (raw color index), 1 = C TAG (color tag / action tile detection).
+     *
+     * Legoino always activates the sensor in mode 0; the registered callback stays valid because
+     * modes 0 and 1 deliver the same format (one 8-bit color index).
+     */
+    void setColorSensorMode(byte mode);
+
+    /**
      * @brief Start playback of a DUPLO sound effect.
      * @param sound DUPLO sound identifier to send to the hub.
      */

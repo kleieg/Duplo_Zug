@@ -36,6 +36,16 @@ void myLegoHub::setSpeakerSoundMode()
     WriteValue(setSoundMode, 8);
 }
 
+/**
+ * @brief Switch the activated color sensor to another input mode (Port Input Format Setup).
+ * @param mode 0 = COLOR, 1 = C TAG; delta 1, notifications enabled.
+ */
+void myLegoHub::setColorSensorMode(byte mode)
+{
+    byte setMode[8] = { 0x41, (byte)DuploTrainHubPort::COLOR, mode, 0x01, 0x00, 0x00, 0x00, 0x01 };
+    WriteValue(setMode, 8);
+}
+
 
 /**
  * @brief Play a sound by sound ID.

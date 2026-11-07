@@ -582,6 +582,15 @@ static void detectedColorCb(DuploEnums::DuploColor color)
 
     detectedColor = color; // Store the detected color
 
+    // Tiles only count while the train is actually driving: a target speed is set AND the speed
+    // sensor reports movement. Standing, lifted (hub stops the motor), pushed by hand (no target)
+    // or during a water stop (target 0) the sensor sees carpet, floor or nothing -> ignore.
+    if (lastSpeed == 0 || detectedSpeed == 0)
+    {
+        DEBUG_LOG("TrainController: Color ignored (train not moving)");
+        return;
+    }
+
     switch (color)
     {
 
@@ -612,7 +621,7 @@ static void detectedColorCb(DuploEnums::DuploColor color)
         lastGreenMs = now;
         cancelWaterStop();
 
-        const int reverseSpeed = (lastSpeed == 0) ? -40 : -lastSpeed;
+        const int reverseSpeed = -lastSpeed; // only reached while driving (see movement check above)
         noteTargetSpeed(reverseSpeed);        // reversing while moving passes through 0
         duploHub.setMotorSpeed(reverseSpeed); // motor first: reverse directly, no separate stop
         lastSpeed = reverseSpeed;
