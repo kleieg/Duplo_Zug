@@ -60,11 +60,13 @@ namespace
     constexpr uint64_t COLOR_SETTLE_DELAY_US = 80000; // 80 ms debounce window
     // Color sensor input mode: 0 = COLOR (classifies any surface into a color index, also carpet,
     // floor, nothing), 1 = C TAG ("color tag", presumably the hub's own action tile detection).
-    // TEST: C TAG is being evaluated against false detections; set to 0 for the previous behavior.
+    // C TAG reports one event per action tile (color, then 0xff) and nothing on carpet/floor, so
+    // it is far more robust; its events bypass the debounce (see staticColorSensorCallback()).
+    // 0 restores the plain COLOR mode with the debounce.
     constexpr uint8_t COLOR_SENSOR_MODE = 1;
     // TEST diagnostics: log every raw color sensor message and what the debounce emits or
     // suppresses (same color as the last stable one). Set to false to disable.
-    constexpr bool COLOR_RAW_DIAG = true;
+    constexpr bool COLOR_RAW_DIAG = false;
     // The DUPLO hub silently drops a command that arrives while it is still processing the
     // previous one (seen on hardware with 20 ms spacing: random loss of stop/sound/LED commands
     // and sensor activations). Normally the BLE task waits for the hub's acknowledgement
@@ -669,12 +671,15 @@ void DuploHub::staticColorSensorCallback(void *hub, byte portNumber, DeviceType 
 
     if (detectedColor < DuploEnums::DuploColor::BLACK || detectedColor > DuploEnums::DuploColor::WHITE)
     {
-        return; // Ignore out-of-range values entirely
+        return; // Ignore out-of-range values entirely (C TAG: 0xff = end of tag)
     }
 
-    if (!ensureColorTimerInitialized())
+    // C TAG mode sends one discrete event per tile (tag color, then 0xff), nothing in between:
+    // emit it immediately. No debounce and no "same as last color" filter, otherwise two tiles of
+    // the same color in a row would be swallowed. COLOR mode needs the debounce below.
+    if (COLOR_SENSOR_MODE == 1 || !ensureColorTimerInitialized())
     {
-        // Fallback: emit immediately if timer setup failed
+        // Emit immediately (C TAG event, or fallback if the debounce timer could not be created)
         if (instance != nullptr && instance->responseQueue != nullptr)
         {
             HubResponse response;

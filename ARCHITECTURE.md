@@ -123,13 +123,17 @@ Buttons and dial are ignored until the hub is connected and ready. During replay
 
 ### Color sensor
 
-The color sensor is noisy on reflective surfaces. To reduce false triggers:
+The sensor runs in mode 1 "C TAG" (`COLOR_SENSOR_MODE` in `DuploHub.cpp`): the hub reports one event per action tile (tile color, followed ~1 ms later by `0xff` = end of tag) and nothing for carpet, floor or track. Each event is pushed into `responseQueue` immediately (no debounce, no same-color filter, so two equal tiles in a row both count); `0xff` is ignored.
+
+In the alternative mode 0 "COLOR" the sensor classifies any surface and is noisy, so there:
 
 - raw color changes are collected in BLE context
-- a one-shot ESP timer waits for 80 ms stability (short enough to register a tile at full speed)
-- only stable transitions are pushed into `responseQueue`
+- a one-shot ESP timer waits for 80 ms stability
+- only stable transitions (different from the last stable color) are pushed into `responseQueue`
 
-Color bricks are handled entirely by the controller (the hub does nothing on its own while connected; ignored during record and replay). The motor command is always sent first, sound and LED after it. Tiles only count while the train is driving (target speed set and the speed sensor reports movement), so standing, lifted or pushed trains do not react to carpet or floor. Only the five action colors react; black (track gaps) and other colors are ignored. The color sensor runs in mode 1 "C TAG" (color tag, under evaluation; `COLOR_SENSOR_MODE` in `DuploHub.cpp`, 0 = plain COLOR). RED stops; GREEN reverses directly, further GREEN detections are ignored for 1 s so the reversing train does not reverse again on the same tile; BLUE stops for 2.5 s with the water sound and then continues at the previous speed (dial or STOP during the pause win); YELLOW horn; WHITE toggles the train light.
+`COLOR_RAW_DIAG` logs every raw sensor message and the debounce decisions (off by default).
+
+Color bricks are handled entirely by the controller (the hub does nothing on its own while connected; ignored during record and replay). The motor command is always sent first, sound and LED after it. Tiles only count while the train is driving (target speed set and the speed sensor reports movement), so standing, lifted or pushed trains do not react to carpet or floor. Only the five action colors react; black (track gaps) and other colors are ignored. The color sensor runs in mode 1 "C TAG" (one event per action tile, see Color sensor above). RED stops; GREEN reverses directly, further GREEN detections are ignored for 1 s so the reversing train does not reverse again on the same tile; BLUE stops for 2.5 s with the water sound and then continues at the previous speed (dial or STOP during the pause win); YELLOW horn; WHITE toggles the train light.
 
 ### Speed sensor
 
