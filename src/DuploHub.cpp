@@ -62,6 +62,9 @@ namespace
     // floor, nothing), 1 = C TAG ("color tag", presumably the hub's own action tile detection).
     // TEST: C TAG is being evaluated against false detections; set to 0 for the previous behavior.
     constexpr uint8_t COLOR_SENSOR_MODE = 1;
+    // TEST diagnostics: log every raw color sensor message and what the debounce emits or
+    // suppresses (same color as the last stable one). Set to false to disable.
+    constexpr bool COLOR_RAW_DIAG = true;
     // The DUPLO hub silently drops a command that arrives while it is still processing the
     // previous one (seen on hardware with 20 ms spacing: random loss of stop/sound/LED commands
     // and sensor activations). Normally the BLE task waits for the hub's acknowledgement
@@ -651,6 +654,19 @@ void DuploHub::staticColorSensorCallback(void *hub, byte portNumber, DeviceType 
 
     int detectedColor = myHub->parseColor(pData);
 
+    if (COLOR_RAW_DIAG)
+    {
+        char line[96];
+        int pos = snprintf(line, sizeof(line), "[COLOR RAW %lu]", millis());
+        const int length = pData[0];
+        for (int i = 0; i < length && pos < (int)sizeof(line) - 16; i++)
+        {
+            pos += snprintf(line + pos, sizeof(line) - pos, " %02x", pData[i]);
+        }
+        snprintf(line + pos, sizeof(line) - pos, "  -> color %d", detectedColor);
+        Serial.println(line);
+    }
+
     if (detectedColor < DuploEnums::DuploColor::BLACK || detectedColor > DuploEnums::DuploColor::WHITE)
     {
         return; // Ignore out-of-range values entirely
@@ -725,6 +741,7 @@ void DuploHub::colorStabilityTimerCallback(void *arg)
 
     int colorToEmit = -1;
     int rawColorToEmit = -1;
+    int suppressedColor = -1;
     portENTER_CRITICAL(&colorTimerMutex);
     if (pendingColor >= DuploEnums::DuploColor::BLACK && pendingColor <= DuploEnums::DuploColor::WHITE)
     {
@@ -734,11 +751,27 @@ void DuploHub::colorStabilityTimerCallback(void *arg)
             rawColorToEmit = pendingRawColor;
             lastStableColor = pendingColor;
         }
+        else
+        {
+            suppressedColor = pendingColor;
+        }
     }
 
     pendingColor = -1;
     pendingRawColor = -1;
     portEXIT_CRITICAL(&colorTimerMutex);
+
+    if (COLOR_RAW_DIAG)
+    {
+        if (colorToEmit != -1)
+        {
+            Serial.printf("[COLOR STABLE %lu] emit color %d\n", millis(), colorToEmit);
+        }
+        else if (suppressedColor != -1)
+        {
+            Serial.printf("[COLOR STABLE %lu] suppressed color %d (same as last stable)\n", millis(), suppressedColor);
+        }
+    }
 
     if (colorToEmit == -1)
     {
